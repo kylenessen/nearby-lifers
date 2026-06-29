@@ -1,24 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, FormEvent } from 'react'
 import {
   Check,
   ChevronDown,
   ChevronUp,
   Circle,
+  LocateFixed,
   LoaderCircle,
+  MapPin,
   RefreshCw,
+  Search,
   SlidersHorizontal,
 } from 'lucide-react'
 import './App.css'
+import { LocationMap, type LatLngPoint, type SearchArea } from './LocationMap'
 import {
+  type INatGeoJson,
+  type INatPlace,
   type INatUser,
+  type SpeciesCountBounds,
   fetchSpeciesCounts,
   getPhotoUrl,
   resolveUser,
+  searchPlaces,
 } from './inaturalist'
 
 const DEFAULT_USERNAME = 'kylenessen'
-const DEFAULT_LAT = 35.32763176091517
-const DEFAULT_LNG = -120.83909699047472
+const DEFAULT_CENTER = {
+  lat: 35.32763176091517,
+  lng: -120.83909699047472,
+}
 const DEFAULT_RADIUS = 1
 const DEFAULT_COLUMNS = 3
 
@@ -48,8 +59,18 @@ const TAXON_GROUPS = [
   { key: 'fish', label: 'Fish', taxa: ['Actinopterygii'] },
   { key: 'fungi', label: 'Fungi', taxa: ['Fungi'] },
   { key: 'mollusks', label: 'Mollusks', taxa: ['Mollusca'] },
-  { key: 'other', label: 'Other', taxa: ['Animalia', 'Chromista', 'Protozoa'] },
+  {
+    key: 'other',
+    label: 'Other',
+    taxa: ['Animalia', 'Chromista', 'Protozoa', 'unknown'],
+  },
 ]
+
+const ICONIC_TAXON_TO_GROUP = new Map(
+  TAXON_GROUPS.flatMap((group) =>
+    group.taxa.map((taxon) => [taxon, group.key] as const),
+  ),
+)
 
 type SpeciesCard = {
   id: number
@@ -67,11 +88,8 @@ type SpeciesCard = {
 type Snapshot = {
   builtAt: string
   user: INatUser
-  lat: number
-  lng: number
-  radius: number
-  months?: number[]
-  groups: string[]
+  areaLabel: string
+  months: number[]
   observedTotal: number
   species: SpeciesCard[]
 }
@@ -84,11 +102,7 @@ function getSeasonMonths(date = new Date()) {
   return [previousMonth, currentMonth, nextMonth]
 }
 
-function formatMonths(months?: number[]) {
-  if (!months) {
-    return 'All months'
-  }
-
+function formatMonths(months: number[]) {
   return months.map((month) => MONTH_NAMES[month - 1]).join(', ')
 }
 
@@ -102,18 +116,117 @@ function getFallbackLabel(name: string) {
     .toUpperCase()
 }
 
+function getSpeciesGroup(iconicTaxon?: string) {
+  return ICONIC_TAXON_TO_GROUP.get(iconicTaxon ?? 'unknown') ?? 'other'
+}
+
+function findGeoJsonBounds(geoJson?: INatGeoJson | null) {
+  if (!geoJson) {
+    return null
+  }
+
+  const points: LatLngPoint[] = []
+
+  function collectCoordinates(value: unknown) {
+    if (!Array.isArray(value)) {
+      return
+    }
+
+    if (
+      value.length >= 2 &&
+      typeof value[0] === 'number' &&
+      typeof value[1] === 'number'
+    ) {
+      points.push({ lat: value[1], lng: value[0] })
+      return
+    }
+
+    value.forEach(collectCoordinates)
+  }
+
+  collectCoordinates('coordinates' in geoJson ? geoJson.coordinates : null)
+
+  if (points.length === 0) {
+    return null
+  }
+
+  return {
+    sw: {
+      lat: Math.min(...points.map((point) => point.lat)),
+      lng: Math.min(...points.map((point) => point.lng)),
+    },
+    ne: {
+      lat: Math.max(...points.map((point) => point.lat)),
+      lng: Math.max(...points.map((point) => point.lng)),
+    },
+  }
+}
+
+function boundsToSpeciesCountBounds(bounds: {
+  sw: LatLngPoint
+  ne: LatLngPoint
+}): SpeciesCountBounds {
+  return {
+    nelat: bounds.ne.lat,
+    nelng: bounds.ne.lng,
+    swlat: bounds.sw.lat,
+    swlng: bounds.sw.lng,
+  }
+}
+
+function getAreaLabel(area: SearchArea, radiusKm: number) {
+  if (area.kind === 'circle') {
+    return `${radiusKm} km radius`
+  }
+
+  if (area.kind === 'rectangle') {
+    return 'Drawn rectangle'
+  }
+
+  return area.place.display_name ?? area.place.name
+}
+
+function getAreaQuery(area: SearchArea, radiusKm: number) {
+  if (area.kind === 'circle') {
+    return {
+      lat: area.center.lat,
+      lng: area.center.lng,
+      radius: radiusKm,
+    }
+  }
+
+  if (area.kind === 'rectangle') {
+    return {
+      bounds: boundsToSpeciesCountBounds(area.bounds),
+    }
+  }
+
+  return {
+    placeIds: [area.place.id],
+  }
+}
+
 function App() {
   const defaultMonths = useMemo(() => getSeasonMonths(), [])
   const [username, setUsername] = useState(DEFAULT_USERNAME)
-  const [lat, setLat] = useState(String(DEFAULT_LAT))
-  const [lng, setLng] = useState(String(DEFAULT_LNG))
   const [radius, setRadius] = useState(String(DEFAULT_RADIUS))
-  const [useSeasonWindow, setUseSeasonWindow] = useState(true)
+  const [searchMode, setSearchMode] = useState<'circle' | 'rectangle'>('circle')
+  const [searchArea, setSearchArea] = useState<SearchArea>({
+    kind: 'circle',
+    center: DEFAULT_CENTER,
+  })
+  const [placeQuery, setPlaceQuery] = useState('')
+  const [placeResults, setPlaceResults] = useState<INatPlace[]>([])
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false)
+  const [isLocating, setIsLocating] = useState(false)
+  const [selectedMonths, setSelectedMonths] = useState(
+    () => new Set(defaultMonths),
+  )
   const [selectedGroups, setSelectedGroups] = useState(
     () => new Set(TAXON_GROUPS.map((group) => group.key)),
   )
   const [columns, setColumns] = useState(DEFAULT_COLUMNS)
-  const [showDone, setShowDone] = useState(false)
+  const [showHiddenSpecies, setShowHiddenSpecies] = useState(false)
   const [hideCasualOnly, setHideCasualOnly] = useState(false)
   const [hideUnexpected, setHideUnexpected] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(true)
@@ -123,46 +236,31 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const didAutoBuild = useRef(false)
 
-  const selectedGroupLabels = useMemo(
-    () =>
-      TAXON_GROUPS.filter((group) => selectedGroups.has(group.key)).map(
-        (group) => group.label,
-      ),
-    [selectedGroups],
+  const radiusKm = Number(radius)
+  const selectedMonthsArray = useMemo(
+    () => Array.from(selectedMonths).sort((a, b) => a - b),
+    [selectedMonths],
   )
 
-  const selectedIconicTaxa = useMemo(
-    () =>
-      selectedGroups.size === TAXON_GROUPS.length
-        ? undefined
-        : TAXON_GROUPS.filter((group) => selectedGroups.has(group.key)).flatMap(
-            (group) => group.taxa,
-          ),
-    [selectedGroups],
-  )
+  const handleCircleCenterSelected = useCallback((point: LatLngPoint) => {
+    setSearchArea({ kind: 'circle', center: point })
+  }, [])
 
-  const selectedMonths = useMemo(
-    () => (useSeasonWindow ? defaultMonths : undefined),
-    [defaultMonths, useSeasonWindow],
+  const handleRectangleSelected = useCallback(
+    (bounds: { sw: LatLngPoint; ne: LatLngPoint }) => {
+      setSearchArea({ kind: 'rectangle', bounds })
+    },
+    [],
   )
 
   const buildSnapshot = useCallback(async () => {
-    const numericLat = Number(lat)
-    const numericLng = Number(lng)
-    const numericRadius = Number(radius)
-
-    if (!Number.isFinite(numericLat) || !Number.isFinite(numericLng)) {
-      setError('Latitude and longitude need to be valid numbers')
-      return
-    }
-
-    if (!Number.isFinite(numericRadius) || numericRadius <= 0) {
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0) {
       setError('Radius needs to be greater than zero')
       return
     }
 
-    if (selectedGroups.size === 0) {
-      setError('Choose at least one life group')
+    if (selectedMonthsArray.length === 0) {
+      setError('Choose at least one month')
       return
     }
 
@@ -171,29 +269,21 @@ function App() {
 
     try {
       const user = await resolveUser(username)
+      const areaQuery = getAreaQuery(searchArea, radiusKm)
       const [nearbyCounts, nonCasualCounts, expectedNearbyCounts, observedCounts] =
         await Promise.all([
           fetchSpeciesCounts({
-            lat: numericLat,
-            lng: numericLng,
-            radius: numericRadius,
-            months: selectedMonths,
-            iconicTaxa: selectedIconicTaxa,
+            ...areaQuery,
+            months: selectedMonthsArray,
           }),
           fetchSpeciesCounts({
-            lat: numericLat,
-            lng: numericLng,
-            radius: numericRadius,
-            months: selectedMonths,
-            iconicTaxa: selectedIconicTaxa,
+            ...areaQuery,
+            months: selectedMonthsArray,
             qualityGrades: ['needs_id', 'research'],
           }),
           fetchSpeciesCounts({
-            lat: numericLat,
-            lng: numericLng,
-            radius: numericRadius,
-            months: selectedMonths,
-            iconicTaxa: selectedIconicTaxa,
+            ...areaQuery,
+            months: selectedMonthsArray,
             expectedNearby: true,
           }),
           fetchSpeciesCounts({ userId: user.id }),
@@ -231,11 +321,8 @@ function App() {
       setSnapshot({
         builtAt: new Date().toISOString(),
         user,
-        lat: numericLat,
-        lng: numericLng,
-        radius: numericRadius,
-        months: selectedMonths,
-        groups: selectedGroupLabels,
+        areaLabel: getAreaLabel(searchArea, radiusKm),
+        months: selectedMonthsArray,
         observedTotal: observedCounts.totalResults,
         species,
       })
@@ -248,16 +335,7 @@ function App() {
     } finally {
       setIsLoading(false)
     }
-  }, [
-    lat,
-    lng,
-    radius,
-    selectedGroups.size,
-    selectedGroupLabels,
-    selectedIconicTaxa,
-    selectedMonths,
-    username,
-  ])
+  }, [radiusKm, searchArea, selectedMonthsArray, username])
 
   useEffect(() => {
     if (didAutoBuild.current) {
@@ -282,6 +360,20 @@ function App() {
     })
   }
 
+  function toggleMonth(month: number) {
+    setSelectedMonths((currentMonths) => {
+      const nextMonths = new Set(currentMonths)
+
+      if (nextMonths.has(month)) {
+        nextMonths.delete(month)
+      } else {
+        nextMonths.add(month)
+      }
+
+      return nextMonths
+    })
+  }
+
   function toggleLocalDone(species: SpeciesCard) {
     if (species.observedByUser) {
       return
@@ -300,46 +392,112 @@ function App() {
     })
   }
 
-  const visibleSpecies = useMemo(() => {
+  async function handlePlaceSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    setIsSearchingPlaces(true)
+    setError(null)
+
+    try {
+      setPlaceResults(await searchPlaces(placeQuery))
+    } catch (placeError) {
+      setError(
+        placeError instanceof Error
+          ? placeError.message
+          : 'Could not search iNaturalist places',
+      )
+    } finally {
+      setIsSearchingPlaces(false)
+    }
+  }
+
+  function selectPlace(place: INatPlace) {
+    const bounds =
+      findGeoJsonBounds(place.bounding_box_geojson) ??
+      findGeoJsonBounds(place.geometry_geojson)
+
+    setSearchArea({ kind: 'place', place, bounds })
+    setPlaceQuery(place.display_name ?? place.name)
+    setPlaceResults([])
+  }
+
+  function useMyLocation() {
+    if (!navigator.geolocation) {
+      setError('This browser does not support location lookup')
+      return
+    }
+
+    setIsLocating(true)
+    setError(null)
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setSearchMode('circle')
+        setSearchArea({
+          kind: 'circle',
+          center: {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          },
+        })
+        setIsLocating(false)
+      },
+      () => {
+        setError('Could not get your location')
+        setIsLocating(false)
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+      },
+    )
+  }
+
+  const groupFilteredSpecies = useMemo(() => {
     if (!snapshot) {
       return []
     }
 
-    const locallyFilteredSpecies = snapshot.species.filter(
-      (species) =>
-        (!hideCasualOnly || !species.casualOnly) &&
-        (!hideUnexpected || species.expectedNearby),
+    return snapshot.species.filter((species) =>
+      selectedGroups.has(getSpeciesGroup(species.iconicTaxon)),
     )
+  }, [selectedGroups, snapshot])
 
-    return locallyFilteredSpecies.filter((species) => {
-      const isDone = species.observedByUser || localDone.has(species.id)
-      return showDone || !isDone
-    })
-  }, [hideCasualOnly, hideUnexpected, localDone, showDone, snapshot])
+  const locallyFilteredSpecies = useMemo(
+    () =>
+      groupFilteredSpecies.filter(
+        (species) =>
+          (!hideCasualOnly || !species.casualOnly) &&
+          (!hideUnexpected || species.expectedNearby),
+      ),
+    [groupFilteredSpecies, hideCasualOnly, hideUnexpected],
+  )
 
-  const locallyFilteredSpecies = useMemo(() => {
-    if (!snapshot) {
-      return []
-    }
+  const visibleSpecies = useMemo(
+    () =>
+      locallyFilteredSpecies.filter((species) => {
+        const isHidden =
+          species.observedByUser || localDone.has(species.id)
+        return showHiddenSpecies || !isHidden
+      }),
+    [localDone, locallyFilteredSpecies, showHiddenSpecies],
+  )
 
-    return snapshot.species.filter(
-      (species) =>
-        (!hideCasualOnly || !species.casualOnly) &&
-        (!hideUnexpected || species.expectedNearby),
-    )
-  }, [hideCasualOnly, hideUnexpected, snapshot])
-
-  const doneCount = locallyFilteredSpecies.filter(
-    (species) => species.observedByUser || localDone.has(species.id),
+  const lifeListCount = locallyFilteredSpecies.filter(
+    (species) => species.observedByUser,
   ).length
-  const targetCount = locallyFilteredSpecies.length - doneCount
+  const hiddenThisHikeCount = locallyFilteredSpecies.filter((species) =>
+    localDone.has(species.id),
+  ).length
+  const targetCount =
+    locallyFilteredSpecies.length - lifeListCount - hiddenThisHikeCount
   const casualHiddenCount =
     hideCasualOnly && snapshot
-      ? snapshot.species.filter((species) => species.casualOnly).length
+      ? groupFilteredSpecies.filter((species) => species.casualOnly).length
       : 0
   const unexpectedHiddenCount =
     hideUnexpected && snapshot
-      ? snapshot.species.filter((species) => !species.expectedNearby).length
+      ? groupFilteredSpecies.filter((species) => !species.expectedNearby).length
       : 0
   const builtAt = snapshot
     ? new Intl.DateTimeFormat(undefined, {
@@ -385,50 +543,130 @@ function App() {
                   min="0.1"
                   step="0.1"
                   value={radius}
+                  disabled={searchArea.kind !== 'circle'}
                   onChange={(event) => setRadius(event.target.value)}
                 />
               </label>
-              <label>
-                Latitude
-                <input
-                  type="number"
-                  value={lat}
-                  onChange={(event) => setLat(event.target.value)}
-                />
-              </label>
-              <label>
-                Longitude
-                <input
-                  type="number"
-                  value={lng}
-                  onChange={(event) => setLng(event.target.value)}
-                />
-              </label>
             </div>
 
-            <div className="toggle-row">
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={useSeasonWindow}
-                  onChange={(event) => setUseSeasonWindow(event.target.checked)}
-                />
-                <span>Season window</span>
-              </label>
-              <span className="soft-text">{formatMonths(selectedMonths)}</span>
-            </div>
-
-            <div className="chip-group" aria-label="Life groups">
-              {TAXON_GROUPS.map((group) => (
+            <div className="location-panel">
+              <div className="map-toolbar">
                 <button
                   type="button"
-                  key={group.key}
-                  className={selectedGroups.has(group.key) ? 'is-selected' : ''}
-                  onClick={() => toggleGroup(group.key)}
+                  className="location-button"
+                  onClick={useMyLocation}
+                  disabled={isLocating}
                 >
-                  {group.label}
+                  {isLocating ? (
+                    <LoaderCircle size={18} aria-hidden="true" />
+                  ) : (
+                    <LocateFixed size={18} aria-hidden="true" />
+                  )}
+                  Use my location
                 </button>
-              ))}
+                <div className="segmented-control">
+                  <button
+                    type="button"
+                    className={searchMode === 'circle' ? 'is-selected' : ''}
+                    onClick={() => setSearchMode('circle')}
+                  >
+                    Point
+                  </button>
+                  <button
+                    type="button"
+                    className={searchMode === 'rectangle' ? 'is-selected' : ''}
+                    onClick={() => setSearchMode('rectangle')}
+                  >
+                    Rectangle
+                  </button>
+                </div>
+              </div>
+
+              <LocationMap
+                area={searchArea}
+                mode={searchMode}
+                radiusKm={Number.isFinite(radiusKm) ? radiusKm : DEFAULT_RADIUS}
+                onCircleCenterSelected={handleCircleCenterSelected}
+                onRectangleSelected={handleRectangleSelected}
+              />
+
+              <form className="place-search" onSubmit={handlePlaceSearch}>
+                <label>
+                  iNaturalist place
+                  <div className="input-action">
+                    <input
+                      value={placeQuery}
+                      onChange={(event) => setPlaceQuery(event.target.value)}
+                      placeholder="Search places"
+                    />
+                    <button type="submit" disabled={isSearchingPlaces}>
+                      {isSearchingPlaces ? (
+                        <LoaderCircle size={16} aria-hidden="true" />
+                      ) : (
+                        <Search size={16} aria-hidden="true" />
+                      )}
+                      Search
+                    </button>
+                  </div>
+                </label>
+              </form>
+
+              {placeResults.length > 0 ? (
+                <div className="place-results">
+                  {placeResults.map((place) => (
+                    <button
+                      type="button"
+                      key={place.id}
+                      onClick={() => selectPlace(place)}
+                    >
+                      <MapPin size={15} aria-hidden="true" />
+                      <span>{place.display_name ?? place.name}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="filter-section">
+              <p className="control-label">Months</p>
+              <div className="chip-group month-grid" aria-label="Months">
+                {MONTH_NAMES.map((month, index) => {
+                  const monthNumber = index + 1
+
+                  return (
+                    <button
+                      type="button"
+                      key={month}
+                      aria-pressed={selectedMonths.has(monthNumber)}
+                      className={
+                        selectedMonths.has(monthNumber) ? 'is-selected' : ''
+                      }
+                      onClick={() => toggleMonth(monthNumber)}
+                    >
+                      {month}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="filter-section">
+              <p className="control-label">Life groups</p>
+              <div className="chip-group" aria-label="Life groups">
+                {TAXON_GROUPS.map((group) => (
+                  <button
+                    type="button"
+                    key={group.key}
+                    aria-pressed={selectedGroups.has(group.key)}
+                    className={
+                      selectedGroups.has(group.key) ? 'is-selected' : ''
+                    }
+                    onClick={() => toggleGroup(group.key)}
+                  >
+                    {group.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="settings-footer">
@@ -446,10 +684,12 @@ function App() {
               <label className="switch">
                 <input
                   type="checkbox"
-                  checked={showDone}
-                  onChange={(event) => setShowDone(event.target.checked)}
+                  checked={showHiddenSpecies}
+                  onChange={(event) =>
+                    setShowHiddenSpecies(event.target.checked)
+                  }
                 />
-                <span>Show done</span>
+                <span>Show hidden species</span>
               </label>
               <label className="switch">
                 <input
@@ -500,9 +740,13 @@ function App() {
         {snapshot ? (
           <section className="snapshot-summary" aria-live="polite">
             <strong>{targetCount} targets</strong>
-            <span>{doneCount} done</span>
+            <span>{lifeListCount} in life list</span>
+            {hiddenThisHikeCount > 0 ? (
+              <span>{hiddenThisHikeCount} hidden this hike</span>
+            ) : null}
             <span>{snapshot.observedTotal} profile taxa</span>
             <span>{formatMonths(snapshot.months)}</span>
+            <span>{snapshot.areaLabel}</span>
             {casualHiddenCount > 0 ? (
               <span>{casualHiddenCount} casual-only hidden</span>
             ) : null}
@@ -524,28 +768,28 @@ function App() {
 
         {snapshot && visibleSpecies.length === 0 ? (
           <div className="message">
-            Every nearby species in this snapshot is marked done.
+            No species match the current local filters.
           </div>
         ) : null}
 
         {snapshot ? (
           <section
             className="species-grid"
-            style={{ '--grid-columns': columns } as React.CSSProperties}
+            style={{ '--grid-columns': columns } as CSSProperties}
             aria-label="Nearby species"
           >
             {visibleSpecies.map((species) => {
-              const isDone =
+              const isHidden =
                 species.observedByUser || localDone.has(species.id)
               const doneLabel = species.observedByUser
                 ? 'Already on your iNaturalist list'
-                : isDone
-                  ? 'Marked done for this hike'
-                  : 'Mark done for this hike'
+                : isHidden
+                  ? 'Restore to this hike'
+                  : 'Hide for this hike'
 
               return (
                 <article
-                  className={`species-card ${isDone ? 'is-done' : ''}`}
+                  className={`species-card ${isHidden ? 'is-done' : ''}`}
                   key={species.id}
                 >
                   <div className="photo-frame">
@@ -567,7 +811,7 @@ function App() {
                       title={doneLabel}
                       onClick={() => toggleLocalDone(species)}
                     >
-                      {isDone ? (
+                      {isHidden ? (
                         <Check size={17} aria-hidden="true" />
                       ) : (
                         <Circle size={18} aria-hidden="true" />
@@ -587,7 +831,15 @@ function App() {
                     </div>
                   </div>
                   <div className="species-copy">
-                    <h2>{species.commonName}</h2>
+                    <h2>
+                      <a
+                        href={`https://www.inaturalist.org/taxa/${species.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {species.commonName}
+                      </a>
+                    </h2>
                     <p>{species.scientificName}</p>
                   </div>
                 </article>

@@ -31,17 +31,37 @@ export type INatTaxon = {
   default_photo?: INatPhoto | null
 }
 
+export type INatGeoJson = GeoJSON.GeoJsonObject
+
+export type INatPlace = {
+  id: number
+  display_name?: string
+  name: string
+  location?: string
+  bounding_box_geojson?: INatGeoJson | null
+  geometry_geojson?: INatGeoJson | null
+}
+
 export type SpeciesCountResult = {
   count: number
   taxon: INatTaxon
+}
+
+export type SpeciesCountBounds = {
+  nelat: number
+  nelng: number
+  swlat: number
+  swlng: number
 }
 
 export type SpeciesCountQuery = {
   lat?: number
   lng?: number
   radius?: number
+  bounds?: SpeciesCountBounds
   months?: number[]
   iconicTaxa?: string[]
+  placeIds?: number[]
   userId?: number
   qualityGrades?: string[]
   expectedNearby?: boolean
@@ -91,6 +111,24 @@ export async function resolveUser(login: string): Promise<INatUser> {
   return user
 }
 
+export async function searchPlaces(query: string): Promise<INatPlace[]> {
+  const trimmedQuery = query.trim()
+
+  if (!trimmedQuery) {
+    return []
+  }
+
+  const params = new URLSearchParams()
+  params.set('q', trimmedQuery)
+  params.set('per_page', '8')
+
+  const data = await fetchJson<INatListResponse<INatPlace>>(
+    `${API_ROOT}/places/autocomplete?${params.toString()}`,
+  )
+
+  return data.results
+}
+
 export async function fetchSpeciesCounts(query: SpeciesCountQuery) {
   const perPage = 500
   const results: SpeciesCountResult[] = []
@@ -105,8 +143,13 @@ export async function fetchSpeciesCounts(query: SpeciesCountQuery) {
     addParam(params, 'lat', query.lat)
     addParam(params, 'lng', query.lng)
     addParam(params, 'radius', query.radius)
+    addParam(params, 'nelat', query.bounds?.nelat)
+    addParam(params, 'nelng', query.bounds?.nelng)
+    addParam(params, 'swlat', query.bounds?.swlat)
+    addParam(params, 'swlng', query.bounds?.swlng)
     addParam(params, 'month', query.months)
     addParam(params, 'iconic_taxa', query.iconicTaxa)
+    addParam(params, 'place_id', query.placeIds)
     addParam(params, 'user_id', query.userId)
     addParam(params, 'quality_grade', query.qualityGrades)
     addParam(params, 'expected_nearby', query.expectedNearby)

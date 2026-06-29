@@ -12,10 +12,16 @@
   z-index: 10;
 }
 
+.settings.is-open {
+  max-height: 82svh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .settings-panel {
   display: grid;
   gap: 14px;
-  padding: 14px;
+  padding: 14px 14px 18px;
 }
 
 .settings-heading,
@@ -72,6 +78,11 @@ input {
   padding: 9px 10px;
 }
 
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 input:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--focus);
@@ -110,15 +121,143 @@ button:focus-visible {
 
 .chip-group button,
 .icon-button,
+.location-button,
 .primary-button,
 .collapsed-settings,
-.done-button {
+.done-button,
+.segmented-control button,
+.input-action button,
+.place-results button {
   align-items: center;
   border: 1px solid transparent;
   cursor: pointer;
   display: inline-flex;
   font: inherit;
   justify-content: center;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.location-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.map-toolbar {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
+}
+
+.location-button {
+  background: var(--ink);
+  border-color: var(--ink);
+  border-radius: 7px;
+  color: #fff;
+  font-weight: 850;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 12px;
+}
+
+.location-button svg,
+.input-action button svg {
+  flex: 0 0 auto;
+}
+
+.segmented-control {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+}
+
+.segmented-control button {
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.segmented-control button.is-selected {
+  background: var(--chip);
+  color: var(--chip-ink);
+}
+
+.map-preview {
+  background: var(--photo-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  height: 230px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.leaflet-container {
+  color: var(--ink);
+  font: inherit;
+}
+
+.place-search {
+  margin: 0;
+}
+
+.input-action {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 1fr auto;
+}
+
+.input-action button {
+  background: var(--field);
+  border-color: var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.place-results {
+  display: grid;
+  gap: 6px;
+}
+
+.place-results button {
+  background: var(--field);
+  border-color: var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  gap: 7px;
+  justify-content: flex-start;
+  min-height: 36px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.place-results span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-section {
+  display: grid;
+  gap: 7px;
+}
+
+.control-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  margin: 0;
 }
 
 .chip-group button {
@@ -136,6 +275,15 @@ button:focus-visible {
   background: var(--chip);
   border-color: var(--chip-line);
   color: var(--chip-ink);
+}
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.month-grid button {
+  padding-inline: 6px;
 }
 
 .settings-footer {
@@ -172,7 +320,6 @@ button:focus-visible {
 }
 
 .primary-button:disabled {
-  cursor: wait;
   opacity: 0.72;
 }
 
@@ -345,6 +492,17 @@ main {
   line-height: 1.15;
   margin: 0 0 3px;
   overflow-wrap: anywhere;
+}
+
+.species-copy a {
+  color: inherit;
+  text-decoration-color: rgba(43, 117, 104, 0.35);
+  text-underline-offset: 2px;
+}
+
+.species-copy a:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
 }
 
 .species-copy p {
