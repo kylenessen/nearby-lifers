@@ -1,32 +1,21 @@
-# React + TypeScript + Vite
+# Nearby Lifers
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Nearby Lifers is a small field prototype for iNaturalist users. It builds a species snapshot for a place and highlights taxa that can add to a user profile species count.
 
-Currently, two official plugins are available:
+The current prototype defaults to `kylenessen`, latitude `35.32763176091517`, longitude `-120.83909699047472`, and a `1 km` radius. It uses the current seasonal window, which is the previous month, current month, and next month. On June 29, 2026, that means May, June, and July.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The app queries iNaturalist species counts for the nearby area and also queries the user's global observed taxa. It then marks anything already observed anywhere in the world as done. Species that are not done appear as targets. During a hike, a target can be tapped to hide it from the current snapshot without uploading or syncing anything.
 
-## React Compiler
+Run the prototype with:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Quality checks:
+
+```sh
+npm run lint
+npm run build
+```
