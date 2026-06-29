@@ -56,6 +56,9 @@ type SpeciesCard = {
   commonName: string
   scientificName: string
   count: number
+  nonCasualCount: number
+  casualOnly: boolean
+  expectedNearby: boolean
   iconicTaxon?: string
   photoUrl?: string
   observedByUser: boolean
@@ -111,6 +114,8 @@ function App() {
   )
   const [columns, setColumns] = useState(DEFAULT_COLUMNS)
   const [showDone, setShowDone] = useState(false)
+  const [hideCasualOnly, setHideCasualOnly] = useState(false)
+  const [hideUnexpected, setHideUnexpected] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(true)
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [localDone, setLocalDone] = useState(() => new Set<number>())
@@ -166,29 +171,56 @@ function App() {
 
     try {
       const user = await resolveUser(username)
-      const [nearbyCounts, observedCounts] = await Promise.all([
-        fetchSpeciesCounts({
-          lat: numericLat,
-          lng: numericLng,
-          radius: numericRadius,
-          months: selectedMonths,
-          iconicTaxa: selectedIconicTaxa,
-        }),
-        fetchSpeciesCounts({ userId: user.id }),
-      ])
+      const [nearbyCounts, nonCasualCounts, expectedNearbyCounts, observedCounts] =
+        await Promise.all([
+          fetchSpeciesCounts({
+            lat: numericLat,
+            lng: numericLng,
+            radius: numericRadius,
+            months: selectedMonths,
+            iconicTaxa: selectedIconicTaxa,
+          }),
+          fetchSpeciesCounts({
+            lat: numericLat,
+            lng: numericLng,
+            radius: numericRadius,
+            months: selectedMonths,
+            iconicTaxa: selectedIconicTaxa,
+            qualityGrades: ['needs_id', 'research'],
+          }),
+          fetchSpeciesCounts({
+            lat: numericLat,
+            lng: numericLng,
+            radius: numericRadius,
+            months: selectedMonths,
+            iconicTaxa: selectedIconicTaxa,
+            expectedNearby: true,
+          }),
+          fetchSpeciesCounts({ userId: user.id }),
+        ])
 
+      const nonCasualCountsByTaxon = new Map(
+        nonCasualCounts.results.map((result) => [result.taxon.id, result.count]),
+      )
+      const expectedNearbyTaxa = new Set(
+        expectedNearbyCounts.results.map((result) => result.taxon.id),
+      )
       const observedTaxa = new Set(
         observedCounts.results.map((result) => result.taxon.id),
       )
       const species = nearbyCounts.results.map((result) => {
         const commonName =
           result.taxon.preferred_common_name ?? result.taxon.name
+        const nonCasualCount = nonCasualCountsByTaxon.get(result.taxon.id) ?? 0
 
         return {
           id: result.taxon.id,
           commonName,
           scientificName: result.taxon.name,
           count: result.count,
+          nonCasualCount,
+          casualOnly: nonCasualCount === 0,
+          expectedNearby: expectedNearbyTaxa.has(result.taxon.id),
           iconicTaxon: result.taxon.iconic_taxon_name,
           photoUrl: getPhotoUrl(result.taxon),
           observedByUser: observedTaxa.has(result.taxon.id),
@@ -273,17 +305,42 @@ function App() {
       return []
     }
 
-    return snapshot.species.filter((species) => {
+    const locallyFilteredSpecies = snapshot.species.filter(
+      (species) =>
+        (!hideCasualOnly || !species.casualOnly) &&
+        (!hideUnexpected || species.expectedNearby),
+    )
+
+    return locallyFilteredSpecies.filter((species) => {
       const isDone = species.observedByUser || localDone.has(species.id)
       return showDone || !isDone
     })
-  }, [localDone, showDone, snapshot])
+  }, [hideCasualOnly, hideUnexpected, localDone, showDone, snapshot])
 
-  const doneCount =
-    snapshot?.species.filter(
-      (species) => species.observedByUser || localDone.has(species.id),
-    ).length ?? 0
-  const targetCount = snapshot ? snapshot.species.length - doneCount : 0
+  const locallyFilteredSpecies = useMemo(() => {
+    if (!snapshot) {
+      return []
+    }
+
+    return snapshot.species.filter(
+      (species) =>
+        (!hideCasualOnly || !species.casualOnly) &&
+        (!hideUnexpected || species.expectedNearby),
+    )
+  }, [hideCasualOnly, hideUnexpected, snapshot])
+
+  const doneCount = locallyFilteredSpecies.filter(
+    (species) => species.observedByUser || localDone.has(species.id),
+  ).length
+  const targetCount = locallyFilteredSpecies.length - doneCount
+  const casualHiddenCount =
+    hideCasualOnly && snapshot
+      ? snapshot.species.filter((species) => species.casualOnly).length
+      : 0
+  const unexpectedHiddenCount =
+    hideUnexpected && snapshot
+      ? snapshot.species.filter((species) => !species.expectedNearby).length
+      : 0
   const builtAt = snapshot
     ? new Intl.DateTimeFormat(undefined, {
         hour: 'numeric',
@@ -394,6 +451,22 @@ function App() {
                 />
                 <span>Show done</span>
               </label>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={hideCasualOnly}
+                  onChange={(event) => setHideCasualOnly(event.target.checked)}
+                />
+                <span>Hide casual-only</span>
+              </label>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={hideUnexpected}
+                  onChange={(event) => setHideUnexpected(event.target.checked)}
+                />
+                <span>Hide unexpected</span>
+              </label>
               <button
                 type="button"
                 className="primary-button"
@@ -430,6 +503,12 @@ function App() {
             <span>{doneCount} done</span>
             <span>{snapshot.observedTotal} profile taxa</span>
             <span>{formatMonths(snapshot.months)}</span>
+            {casualHiddenCount > 0 ? (
+              <span>{casualHiddenCount} casual-only hidden</span>
+            ) : null}
+            {unexpectedHiddenCount > 0 ? (
+              <span>{unexpectedHiddenCount} unexpected hidden</span>
+            ) : null}
             {builtAt ? <span>Built {builtAt}</span> : null}
           </section>
         ) : null}
@@ -495,9 +574,17 @@ function App() {
                       )}
                     </button>
                     <span className="count-pill">{species.count}</span>
-                    {species.count < 5 ? (
-                      <span className="few-pill">Few</span>
-                    ) : null}
+                    <div className="badge-stack">
+                      {species.count < 5 ? (
+                        <span className="few-pill">Few</span>
+                      ) : null}
+                      {species.casualOnly ? (
+                        <span className="casual-pill">Casual</span>
+                      ) : null}
+                      {!species.expectedNearby ? (
+                        <span className="unexpected-pill">Range?</span>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="species-copy">
                     <h2>{species.commonName}</h2>

@@ -43,6 +43,8 @@ export type SpeciesCountQuery = {
   months?: number[]
   iconicTaxa?: string[]
   userId?: number
+  qualityGrades?: string[]
+  expectedNearby?: boolean
 }
 
 function addParam(params: URLSearchParams, key: string, value: QueryValue) {
@@ -106,6 +108,8 @@ export async function fetchSpeciesCounts(query: SpeciesCountQuery) {
     addParam(params, 'month', query.months)
     addParam(params, 'iconic_taxa', query.iconicTaxa)
     addParam(params, 'user_id', query.userId)
+    addParam(params, 'quality_grade', query.qualityGrades)
+    addParam(params, 'expected_nearby', query.expectedNearby)
 
     const data = await fetchJson<INatListResponse<SpeciesCountResult>>(
       `${API_ROOT}/observations/species_counts?${params.toString()}`,
