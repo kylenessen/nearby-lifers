@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, FormEvent } from 'react'
+import type { CSSProperties, FormEvent, KeyboardEvent } from 'react'
 import {
+  ArrowUp,
   Check,
-  ChevronDown,
-  ChevronUp,
   Circle,
   LocateFixed,
   LoaderCircle,
   MapPin,
   RefreshCw,
   Search,
-  SlidersHorizontal,
 } from 'lucide-react'
 import './App.css'
 import { LocationMap, type LatLngPoint, type SearchArea } from './LocationMap'
@@ -19,6 +17,7 @@ import {
   type INatPlace,
   type INatUser,
   type SpeciesCountBounds,
+  fetchPlaceDetails,
   fetchSpeciesCounts,
   getPhotoUrl,
   resolveUser,
@@ -206,6 +205,10 @@ function getAreaQuery(area: SearchArea, radiusKm: number) {
   }
 }
 
+function getPlaceName(place: INatPlace) {
+  return place.display_name ?? place.name
+}
+
 function App() {
   const defaultMonths = useMemo(() => getSeasonMonths(), [])
   const [username, setUsername] = useState(DEFAULT_USERNAME)
@@ -217,6 +220,8 @@ function App() {
   })
   const [placeQuery, setPlaceQuery] = useState('')
   const [placeResults, setPlaceResults] = useState<INatPlace[]>([])
+  const [placeDropdownOpen, setPlaceDropdownOpen] = useState(false)
+  const [placeActiveIndex, setPlaceActiveIndex] = useState(-1)
   const [isSearchingPlaces, setIsSearchingPlaces] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
   const [selectedMonths, setSelectedMonths] = useState(
@@ -229,12 +234,13 @@ function App() {
   const [showHiddenSpecies, setShowHiddenSpecies] = useState(false)
   const [hideCasualOnly, setHideCasualOnly] = useState(false)
   const [hideUnexpected, setHideUnexpected] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(true)
+  const [showBackToTop, setShowBackToTop] = useState(false)
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [localDone, setLocalDone] = useState(() => new Set<number>())
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const didAutoBuild = useRef(false)
+  const placeSearchRequestId = useRef(0)
 
   const radiusKm = Number(radius)
   const selectedMonthsArray = useMemo(
@@ -346,6 +352,71 @@ function App() {
     void buildSnapshot()
   }, [buildSnapshot])
 
+  useEffect(() => {
+    const selectedPlaceName =
+      searchArea.kind === 'place' ? getPlaceName(searchArea.place) : ''
+    const query = placeQuery.trim()
+
+    if (query.length < 2 || query === selectedPlaceName) {
+      setPlaceResults([])
+      setPlaceDropdownOpen(false)
+      setPlaceActiveIndex(-1)
+      setIsSearchingPlaces(false)
+      return
+    }
+
+    const requestId = ++placeSearchRequestId.current
+    setIsSearchingPlaces(true)
+
+    const timeoutId = window.setTimeout(() => {
+      void searchPlaces(query)
+        .then((results) => {
+          if (requestId !== placeSearchRequestId.current) {
+            return
+          }
+
+          setPlaceResults(results)
+          setPlaceDropdownOpen(results.length > 0)
+          setPlaceActiveIndex(-1)
+        })
+        .catch(() => {
+          if (requestId !== placeSearchRequestId.current) {
+            return
+          }
+
+          setPlaceResults([])
+          setPlaceDropdownOpen(false)
+        })
+        .finally(() => {
+          if (requestId === placeSearchRequestId.current) {
+            setIsSearchingPlaces(false)
+          }
+        })
+    }, 250)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [placeQuery, searchArea])
+
+  useEffect(() => {
+    const root = document.getElementById('root')
+
+    function updateBackToTop() {
+      const rootScrollTop = root?.scrollTop ?? 0
+      setShowBackToTop(Math.max(rootScrollTop, window.scrollY) > 700)
+    }
+
+    root?.addEventListener('scroll', updateBackToTop, { passive: true })
+    window.addEventListener('scroll', updateBackToTop, { passive: true })
+    updateBackToTop()
+
+    return () => {
+      root?.removeEventListener('scroll', updateBackToTop)
+      window.removeEventListener('scroll', updateBackToTop)
+    }
+  }, [])
+
   function toggleGroup(groupKey: string) {
     setSelectedGroups((currentGroups) => {
       const nextGroups = new Set(currentGroups)
@@ -395,11 +466,26 @@ function App() {
   async function handlePlaceSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
+    const query = placeQuery.trim()
+
+    if (placeActiveIndex >= 0 && placeResults[placeActiveIndex]) {
+      await selectPlace(placeResults[placeActiveIndex])
+      return
+    }
+
     setIsSearchingPlaces(true)
     setError(null)
 
     try {
-      setPlaceResults(await searchPlaces(placeQuery))
+      if (/^\d+$/.test(query)) {
+        await selectPlace(await fetchPlaceDetails(Number(query)))
+        return
+      }
+
+      const results = await searchPlaces(query)
+      setPlaceResults(results)
+      setPlaceDropdownOpen(results.length > 0)
+      setPlaceActiveIndex(-1)
     } catch (placeError) {
       setError(
         placeError instanceof Error
@@ -411,14 +497,74 @@ function App() {
     }
   }
 
-  function selectPlace(place: INatPlace) {
-    const bounds =
-      findGeoJsonBounds(place.bounding_box_geojson) ??
-      findGeoJsonBounds(place.geometry_geojson)
+  function handlePlaceKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (!placeDropdownOpen || placeResults.length === 0) {
+      return
+    }
 
-    setSearchArea({ kind: 'place', place, bounds })
-    setPlaceQuery(place.display_name ?? place.name)
-    setPlaceResults([])
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setPlaceActiveIndex((currentIndex) =>
+        Math.min(currentIndex + 1, placeResults.length - 1),
+      )
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setPlaceActiveIndex((currentIndex) => Math.max(currentIndex - 1, 0))
+    } else if (event.key === 'Enter' && placeActiveIndex >= 0) {
+      event.preventDefault()
+      void selectPlace(placeResults[placeActiveIndex])
+    } else if (event.key === 'Escape') {
+      setPlaceDropdownOpen(false)
+      setPlaceActiveIndex(-1)
+    }
+  }
+
+  async function selectPlace(place: INatPlace) {
+    const requestId = ++placeSearchRequestId.current
+    setIsSearchingPlaces(true)
+    setError(null)
+
+    try {
+      let selectedPlace = place
+      let bounds =
+        findGeoJsonBounds(selectedPlace.bounding_box_geojson) ??
+        findGeoJsonBounds(selectedPlace.geometry_geojson)
+
+      if (!bounds) {
+        selectedPlace = await fetchPlaceDetails(place.id)
+        bounds =
+          findGeoJsonBounds(selectedPlace.bounding_box_geojson) ??
+          findGeoJsonBounds(selectedPlace.geometry_geojson)
+      }
+
+      if (requestId !== placeSearchRequestId.current) {
+        return
+      }
+
+      setSearchArea({ kind: 'place', place: selectedPlace, bounds })
+      setPlaceQuery(getPlaceName(selectedPlace))
+      setPlaceResults([])
+      setPlaceDropdownOpen(false)
+      setPlaceActiveIndex(-1)
+    } catch (placeError) {
+      setError(
+        placeError instanceof Error
+          ? placeError.message
+          : 'Could not load the iNaturalist place',
+      )
+    } finally {
+      if (requestId === placeSearchRequestId.current) {
+        setIsSearchingPlaces(false)
+      }
+    }
+  }
+
+  function scrollToTop() {
+    document.getElementById('root')?.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function useMyLocation() {
@@ -508,95 +654,99 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className={`settings ${settingsOpen ? 'is-open' : ''}`}>
-        {settingsOpen ? (
-          <div className="settings-panel">
-            <div className="settings-heading">
-              <div>
-                <p className="eyebrow">Nearby Lifers</p>
-                <h1>Snapshot builder</h1>
-              </div>
+      <header className="settings">
+        <div className="settings-panel">
+          <div className="settings-heading">
+            <div>
+              <p className="eyebrow">Nearby Lifers</p>
+              <h1>Snapshot builder</h1>
+            </div>
+          </div>
+
+          <div className="control-grid">
+            <label>
+              iNaturalist user
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                spellCheck={false}
+              />
+            </label>
+            <label className="radius-control">
+              <span>Radius {Number.isFinite(radiusKm) ? radiusKm.toFixed(1) : '1.0'} km</span>
+              <input
+                type="range"
+                min="0.1"
+                max="10"
+                step="0.1"
+                value={radius}
+                disabled={searchArea.kind !== 'circle'}
+                onChange={(event) => setRadius(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="location-panel">
+            <div className="map-toolbar">
               <button
                 type="button"
-                className="icon-button"
-                aria-label="Collapse settings"
-                title="Collapse settings"
-                onClick={() => setSettingsOpen(false)}
+                className="location-button"
+                onClick={useMyLocation}
+                disabled={isLocating}
               >
-                <ChevronUp size={20} aria-hidden="true" />
+                {isLocating ? (
+                  <LoaderCircle size={18} aria-hidden="true" />
+                ) : (
+                  <LocateFixed size={18} aria-hidden="true" />
+                )}
+                Use my location
               </button>
-            </div>
-
-            <div className="control-grid">
-              <label>
-                iNaturalist user
-                <input
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  spellCheck={false}
-                />
-              </label>
-              <label>
-                Radius km
-                <input
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={radius}
-                  disabled={searchArea.kind !== 'circle'}
-                  onChange={(event) => setRadius(event.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="location-panel">
-              <div className="map-toolbar">
+              <div className="segmented-control">
                 <button
                   type="button"
-                  className="location-button"
-                  onClick={useMyLocation}
-                  disabled={isLocating}
+                  className={searchMode === 'circle' ? 'is-selected' : ''}
+                  onClick={() => setSearchMode('circle')}
                 >
-                  {isLocating ? (
-                    <LoaderCircle size={18} aria-hidden="true" />
-                  ) : (
-                    <LocateFixed size={18} aria-hidden="true" />
-                  )}
-                  Use my location
+                  Point
                 </button>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={searchMode === 'circle' ? 'is-selected' : ''}
-                    onClick={() => setSearchMode('circle')}
-                  >
-                    Point
-                  </button>
-                  <button
-                    type="button"
-                    className={searchMode === 'rectangle' ? 'is-selected' : ''}
-                    onClick={() => setSearchMode('rectangle')}
-                  >
-                    Rectangle
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className={searchMode === 'rectangle' ? 'is-selected' : ''}
+                  onClick={() => setSearchMode('rectangle')}
+                >
+                  Rectangle
+                </button>
               </div>
+            </div>
 
-              <LocationMap
-                area={searchArea}
-                mode={searchMode}
-                radiusKm={Number.isFinite(radiusKm) ? radiusKm : DEFAULT_RADIUS}
-                onCircleCenterSelected={handleCircleCenterSelected}
-                onRectangleSelected={handleRectangleSelected}
-              />
+            <LocationMap
+              area={searchArea}
+              mode={searchMode}
+              radiusKm={Number.isFinite(radiusKm) ? radiusKm : DEFAULT_RADIUS}
+              onCircleCenterSelected={handleCircleCenterSelected}
+              onRectangleSelected={handleRectangleSelected}
+            />
 
-              <form className="place-search" onSubmit={handlePlaceSearch}>
+            <form className="place-search" onSubmit={handlePlaceSearch}>
+              <div className="place-search-field">
                 <label>
                   iNaturalist place
                   <div className="input-action">
                     <input
                       value={placeQuery}
-                      onChange={(event) => setPlaceQuery(event.target.value)}
+                      onBlur={() => {
+                        window.setTimeout(() => setPlaceDropdownOpen(false), 150)
+                      }}
+                      onChange={(event) => {
+                        setPlaceQuery(event.target.value)
+                        setPlaceDropdownOpen(true)
+                      }}
+                      onFocus={() => {
+                        if (placeResults.length > 0) {
+                          setPlaceDropdownOpen(true)
+                        }
+                      }}
+                      onKeyDown={handlePlaceKeyDown}
                       placeholder="Search places"
                     />
                     <button type="submit" disabled={isSearchingPlaces}>
@@ -609,131 +759,119 @@ function App() {
                     </button>
                   </div>
                 </label>
-              </form>
 
-              {placeResults.length > 0 ? (
-                <div className="place-results">
-                  {placeResults.map((place) => (
-                    <button
-                      type="button"
-                      key={place.id}
-                      onClick={() => selectPlace(place)}
-                    >
-                      <MapPin size={15} aria-hidden="true" />
-                      <span>{place.display_name ?? place.name}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="filter-section">
-              <p className="control-label">Months</p>
-              <div className="chip-group month-grid" aria-label="Months">
-                {MONTH_NAMES.map((month, index) => {
-                  const monthNumber = index + 1
-
-                  return (
-                    <button
-                      type="button"
-                      key={month}
-                      aria-pressed={selectedMonths.has(monthNumber)}
-                      className={
-                        selectedMonths.has(monthNumber) ? 'is-selected' : ''
-                      }
-                      onClick={() => toggleMonth(monthNumber)}
-                    >
-                      {month}
-                    </button>
-                  )
-                })}
+                {placeDropdownOpen && placeResults.length > 0 ? (
+                  <ul className="place-dropdown">
+                    {placeResults.map((place, index) => (
+                      <li
+                        className={placeActiveIndex === index ? 'is-active' : ''}
+                        key={place.id}
+                        onMouseDown={(event) => {
+                          event.preventDefault()
+                          void selectPlace(place)
+                        }}
+                      >
+                        <MapPin size={15} aria-hidden="true" />
+                        <span>{getPlaceName(place)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
-            </div>
+            </form>
+          </div>
 
-            <div className="filter-section">
-              <p className="control-label">Life groups</p>
-              <div className="chip-group" aria-label="Life groups">
-                {TAXON_GROUPS.map((group) => (
+          <div className="filter-section">
+            <p className="control-label">Months</p>
+            <div className="chip-group month-grid" aria-label="Months">
+              {MONTH_NAMES.map((month, index) => {
+                const monthNumber = index + 1
+
+                return (
                   <button
                     type="button"
-                    key={group.key}
-                    aria-pressed={selectedGroups.has(group.key)}
+                    key={month}
+                    aria-pressed={selectedMonths.has(monthNumber)}
                     className={
-                      selectedGroups.has(group.key) ? 'is-selected' : ''
+                      selectedMonths.has(monthNumber) ? 'is-selected' : ''
                     }
-                    onClick={() => toggleGroup(group.key)}
+                    onClick={() => toggleMonth(monthNumber)}
                   >
-                    {group.label}
+                    {month}
                   </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="settings-footer">
-              <label className="column-control">
-                Grid columns
-                <input
-                  type="range"
-                  min="2"
-                  max="5"
-                  value={columns}
-                  onChange={(event) => setColumns(Number(event.target.value))}
-                />
-                <span>{columns}</span>
-              </label>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={showHiddenSpecies}
-                  onChange={(event) =>
-                    setShowHiddenSpecies(event.target.checked)
-                  }
-                />
-                <span>Show hidden species</span>
-              </label>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={hideCasualOnly}
-                  onChange={(event) => setHideCasualOnly(event.target.checked)}
-                />
-                <span>Hide casual-only</span>
-              </label>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={hideUnexpected}
-                  onChange={(event) => setHideUnexpected(event.target.checked)}
-                />
-                <span>Hide unexpected</span>
-              </label>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={buildSnapshot}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <LoaderCircle size={17} aria-hidden="true" />
-                ) : (
-                  <RefreshCw size={17} aria-hidden="true" />
-                )}
-                Build snapshot
-              </button>
+                )
+              })}
             </div>
           </div>
-        ) : (
-          <button
-            type="button"
-            className="collapsed-settings"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <ChevronDown size={18} aria-hidden="true" />
-            <SlidersHorizontal size={17} aria-hidden="true" />
-            <span>Settings</span>
-            {snapshot ? <strong>{targetCount} targets</strong> : null}
-          </button>
-        )}
+
+          <div className="filter-section">
+            <p className="control-label">Life groups</p>
+            <div className="chip-group" aria-label="Life groups">
+              {TAXON_GROUPS.map((group) => (
+                <button
+                  type="button"
+                  key={group.key}
+                  aria-pressed={selectedGroups.has(group.key)}
+                  className={selectedGroups.has(group.key) ? 'is-selected' : ''}
+                  onClick={() => toggleGroup(group.key)}
+                >
+                  {group.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-footer">
+            <label className="column-control">
+              Grid columns
+              <input
+                type="range"
+                min="2"
+                max="5"
+                value={columns}
+                onChange={(event) => setColumns(Number(event.target.value))}
+              />
+              <span>{columns}</span>
+            </label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={showHiddenSpecies}
+                onChange={(event) => setShowHiddenSpecies(event.target.checked)}
+              />
+              <span>Show hidden species</span>
+            </label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={hideCasualOnly}
+                onChange={(event) => setHideCasualOnly(event.target.checked)}
+              />
+              <span>Hide casual-only</span>
+            </label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={hideUnexpected}
+                onChange={(event) => setHideUnexpected(event.target.checked)}
+              />
+              <span>Hide unexpected</span>
+            </label>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={buildSnapshot}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <LoaderCircle size={17} aria-hidden="true" />
+              ) : (
+                <RefreshCw size={17} aria-hidden="true" />
+              )}
+              Build snapshot
+            </button>
+          </div>
+        </div>
       </header>
 
       <main>
@@ -848,6 +986,18 @@ function App() {
           </section>
         ) : null}
       </main>
+
+      {showBackToTop ? (
+        <button
+          type="button"
+          className="back-to-top"
+          aria-label="Back to top"
+          title="Back to top"
+          onClick={scrollToTop}
+        >
+          <ArrowUp size={19} aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   )
 }

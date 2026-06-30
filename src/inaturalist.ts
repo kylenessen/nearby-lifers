@@ -1,4 +1,5 @@
 const API_ROOT = 'https://api.inaturalist.org/v1'
+const placeCache = new Map<number, INatPlace>()
 
 type QueryValue = string | number | boolean | Array<string | number> | undefined
 
@@ -114,19 +115,43 @@ export async function resolveUser(login: string): Promise<INatUser> {
 export async function searchPlaces(query: string): Promise<INatPlace[]> {
   const trimmedQuery = query.trim()
 
-  if (!trimmedQuery) {
+  if (trimmedQuery.length < 2) {
     return []
   }
 
   const params = new URLSearchParams()
   params.set('q', trimmedQuery)
-  params.set('per_page', '8')
+  params.set('per_page', '10')
 
   const data = await fetchJson<INatListResponse<INatPlace>>(
     `${API_ROOT}/places/autocomplete?${params.toString()}`,
   )
 
   return data.results
+}
+
+export async function fetchPlaceDetails(placeId: number): Promise<INatPlace> {
+  if (!Number.isInteger(placeId) || placeId <= 0) {
+    throw new Error('Invalid iNaturalist place ID')
+  }
+
+  const cachedPlace = placeCache.get(placeId)
+
+  if (cachedPlace) {
+    return cachedPlace
+  }
+
+  const data = await fetchJson<INatListResponse<INatPlace>>(
+    `${API_ROOT}/places/${placeId}`,
+  )
+  const place = data.results[0]
+
+  if (!place) {
+    throw new Error('iNaturalist place not found')
+  }
+
+  placeCache.set(placeId, place)
+  return place
 }
 
 export async function fetchSpeciesCounts(query: SpeciesCountQuery) {

@@ -7,15 +7,6 @@
 .settings {
   background: var(--panel);
   border-bottom: 1px solid var(--line);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.settings.is-open {
-  max-height: 82svh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .settings-panel {
@@ -57,6 +48,10 @@ h1 {
   display: grid;
   gap: 10px;
   grid-template-columns: 1fr 1fr;
+}
+
+.radius-control {
+  align-content: end;
 }
 
 label {
@@ -120,14 +115,13 @@ button:focus-visible {
 }
 
 .chip-group button,
-.icon-button,
 .location-button,
 .primary-button,
-.collapsed-settings,
 .done-button,
 .segmented-control button,
 .input-action button,
-.place-results button {
+.place-dropdown li,
+.back-to-top {
   align-items: center;
   border: 1px solid transparent;
   cursor: pointer;
@@ -208,6 +202,10 @@ button:disabled {
   margin: 0;
 }
 
+.place-search-field {
+  position: relative;
+}
+
 .input-action {
   display: grid;
   gap: 7px;
@@ -225,24 +223,40 @@ button:disabled {
   padding: 8px 10px;
 }
 
-.place-results {
-  display: grid;
-  gap: 6px;
+.place-dropdown {
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: 0 0 7px 7px;
+  box-shadow: 0 10px 28px rgba(23, 33, 32, 0.16);
+  left: 0;
+  list-style: none;
+  margin: -1px 0 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 30;
 }
 
-.place-results button {
-  background: var(--field);
-  border-color: var(--line);
-  border-radius: 7px;
+.place-dropdown li {
   color: var(--ink);
   gap: 7px;
   justify-content: flex-start;
   min-height: 36px;
   padding: 8px 10px;
   text-align: left;
+  width: 100%;
 }
 
-.place-results span {
+.place-dropdown li.is-active,
+.place-dropdown li:hover {
+  background: var(--chip);
+  color: var(--chip-ink);
+}
+
+.place-dropdown span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -321,28 +335,6 @@ button:disabled {
 
 .primary-button:disabled {
   opacity: 0.72;
-}
-
-.icon-button {
-  background: var(--field);
-  border-color: var(--line);
-  border-radius: 999px;
-  color: var(--ink);
-  height: 34px;
-  width: 34px;
-}
-
-.collapsed-settings {
-  background: var(--panel);
-  color: var(--ink);
-  gap: 7px;
-  min-height: 40px;
-  padding: 8px 12px;
-  width: 100%;
-}
-
-.collapsed-settings strong {
-  margin-left: auto;
 }
 
 main {
@@ -520,6 +512,20 @@ main {
 
 .species-card.is-done .photo-frame img {
   filter: grayscale(0.55);
+}
+
+.back-to-top {
+  background: var(--ink);
+  border-color: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  bottom: 18px;
+  box-shadow: 0 12px 30px rgba(23, 33, 32, 0.25);
+  color: #fff;
+  height: 44px;
+  position: fixed;
+  right: 18px;
+  width: 44px;
+  z-index: 40;
 }
 
 @keyframes spin {
