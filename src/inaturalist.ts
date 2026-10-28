@@ -76,6 +76,7 @@ export type Snapshot = {
   areaLabel: string
   builtAt: string
   search: Search
+  place?: INatPlace
 }
 type Observation = {
   id: number

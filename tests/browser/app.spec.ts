@@ -88,7 +88,9 @@ async function mockApi(page: Page) {
         { id: 100, login: 'kyle-test', name: 'Kyle Test' },
       ]
     else if (url.pathname.includes('/users/'))
-      results = [{ id: 99, login: url.pathname.split('/').pop() }]
+      results = [
+        { id: 99, login: url.pathname.split('/').pop(), name: 'Kyle Nessen' },
+      ]
     else if (url.pathname.includes('/places/'))
       results = [
         {
@@ -450,7 +452,7 @@ test('taxonomic grouping, all sort modes, and dense presentation survive a bookm
     .getByRole('combobox', { name: 'Group by', exact: true })
     .selectOption('none')
   await page
-    .getByRole('combobox', { name: 'Sort by', exact: true })
+    .getByRole('combobox', { name: /Sort (by|within groups)/, exact: true })
     .selectOption('common')
   const names = await page.locator('.taxon-checklist li a').allTextContents()
   expect(names).toEqual(
@@ -459,14 +461,14 @@ test('taxonomic grouping, all sort modes, and dense presentation survive a bookm
     ),
   )
   await page
-    .getByRole('combobox', { name: 'Sort by', exact: true })
+    .getByRole('combobox', { name: /Sort (by|within groups)/, exact: true })
     .selectOption('scientific')
   const scientific = await page
     .locator('.taxon-checklist li i')
     .allTextContents()
   expect(scientific).toEqual([...scientific].sort((a, b) => a.localeCompare(b)))
   await page
-    .getByRole('combobox', { name: 'Sort by', exact: true })
+    .getByRole('combobox', { name: /Sort (by|within groups)/, exact: true })
     .selectOption('frequency')
   const counts = (
     await page.locator('.taxon-checklist .record-count').allTextContents()
@@ -500,7 +502,10 @@ test('taxonomic grouping, all sort modes, and dense presentation survive a bookm
     page.getByRole('combobox', { name: 'Group by', exact: true }),
   ).toHaveValue('none')
   await expect(
-    page.getByRole('combobox', { name: 'Sort by', exact: true }),
+    page.getByRole('combobox', {
+      name: /Sort (by|within groups)/,
+      exact: true,
+    }),
   ).toHaveValue('frequency')
 })
 
@@ -535,18 +540,16 @@ for (const layout of ['grid', 'list'] as const) {
     await expect(
       stack.locator(layout === 'grid' ? '.print-card' : '.print-list-row'),
     ).toHaveCount(42)
-    const sides = await stack
-      .locator('.booklet-side')
-      .evaluateAll((elements) =>
-        elements.map((side) =>
-          Array.from(side.querySelectorAll<HTMLElement>('.booklet-slot')).map(
-            (slot) => ({
-              number: Number(slot.dataset.pageNumber),
-              kind: slot.dataset.pageKind,
-            }),
-          ),
+    const sides = await stack.locator('.booklet-side').evaluateAll((elements) =>
+      elements.map((side) =>
+        Array.from(side.querySelectorAll<HTMLElement>('.booklet-slot')).map(
+          (slot) => ({
+            number: Number(slot.dataset.pageNumber),
+            kind: slot.dataset.pageKind,
+          }),
         ),
-      )
+      ),
+    )
     const total = sides.length * 2
     expect(total % 4).toBe(0)
     expect(sides[0]).toEqual([
@@ -572,6 +575,88 @@ for (const layout of ['grid', 'list'] as const) {
     await expect(stack.locator('.booklet-cover h1')).toHaveText(
       'Morro Bay birds & other discoveries',
     )
+    await expect(stack.locator('.booklet-owner')).toHaveText('@kylenessen')
+    await expect(stack.locator('.booklet-date')).toContainText('Generated')
+    const parameters = stack.locator('[data-page-number="2"]')
+    await expect(parameters).toHaveAttribute('data-page-kind', 'parameters')
+    await expect(parameters).toContainText('This search')
+    await expect(parameters).toContainText('All dates and locations')
+    await expect(parameters.locator('.print-map-canvas svg path')).toHaveCount(
+      1,
+    )
+    const contents = stack.locator('[data-page-number="3"]')
+    await expect(contents).toHaveAttribute('data-page-kind', 'contents')
+    const references = await contents
+      .locator('.contents-entry')
+      .evaluateAll((rows) =>
+        rows.map((row) => ({
+          key: (row as HTMLElement).dataset.group!,
+          page: Number(row.querySelector('strong')!.textContent),
+        })),
+      )
+    for (const reference of references) {
+      const pages = await stack
+        .locator(
+          `[data-page-kind="content"]:has([data-group="${reference.key}"])`,
+        )
+        .evaluateAll((slots) =>
+          slots.map((slot) => Number((slot as HTMLElement).dataset.pageNumber)),
+        )
+      expect(reference.page).toBe(Math.min(...pages))
+    }
+    const marks = await stack
+      .locator('.booklet-side')
+      .first()
+      .locator('.staple-guide')
+      .evaluateAll((guides) =>
+        guides.map((guide) => {
+          const rect = guide.getBoundingClientRect()
+          const side = guide.closest('.booklet-side')!.getBoundingClientRect()
+          return {
+            length: rect.height / 96,
+            center: (rect.top + rect.height / 2 - side.top) / 96,
+          }
+        }),
+      )
+    expect(marks).toHaveLength(3)
+    for (let i = 0; i < 3; i++) {
+      expect(marks[i].length).toBeCloseTo(0.5, 2)
+      expect(marks[i].center).toBeCloseTo([1.5, 4.25, 7][i], 2)
+    }
+    if (layout === 'grid') {
+      const gridPages = await stack
+        .locator('[data-page-kind="content"]')
+        .evaluateAll((slots) =>
+          slots
+            .map((slot) => ({
+              page: Number((slot as HTMLElement).dataset.pageNumber),
+              cards: Array.from(
+                slot.querySelectorAll<HTMLElement>('.print-card'),
+              ).map((card) => ({
+                group: card.dataset.group,
+                count: Number(
+                  card
+                    .querySelector('.print-records')!
+                    .textContent!.split(' ')[0],
+                ),
+              })),
+            }))
+            .sort((a, b) => a.page - b.page),
+        )
+      const cards = gridPages.flatMap((p) => p.cards)
+      const closedGroups = new Set<string>()
+      for (let i = 1; i < cards.length; i++) {
+        if (cards[i].group === cards[i - 1].group)
+          expect(cards[i].count).toBeLessThanOrEqual(cards[i - 1].count)
+        else {
+          closedGroups.add(cards[i - 1].group!)
+          expect(closedGroups.has(cards[i].group!)).toBe(false)
+        }
+      }
+      expect(gridPages.slice(0, -1).every((p) => p.cards.length === 15)).toBe(
+        true,
+      )
+    }
     expect(new URL(page.url()).searchParams.get('print')).toBe('booklet')
     expect(new URL(page.url()).searchParams.get('title')).toBe(
       'Morro Bay birds & other discoveries',
@@ -592,12 +677,11 @@ for (const layout of ['grid', 'list'] as const) {
       .nth(1)
       .screenshot({ path: `test-results/booklet-${layout}-inside.png` })
     await page.emulateMedia({ media: 'print' })
-    await expect(stack.locator('[data-page-kind="back-cover"]')).toHaveText(
-      'Blank back cover',
+    await expect(stack.locator('.staple-guide').first()).toBeVisible()
+    await expect(stack.locator('[data-page-kind="back-cover"]')).toContainText(
+      'Generated with the Nearby Lifers tool',
     )
-    expect(
-      await stack.locator('[data-page-kind="back-cover"]').innerText(),
-    ).toBe('')
+    await expect(stack.locator('.booklet-qr')).toBeVisible()
     const pdf = (
       await page.pdf({
         path: `test-results/booklet-${layout}.pdf`,
@@ -632,5 +716,131 @@ for (const layout of ['grid', 'list'] as const) {
     await expect(page.getByLabel('Cover title', { exact: true })).toHaveValue(
       'Morro Bay birds & other discoveries',
     )
+    await page
+      .getByRole('combobox', { name: 'Group by', exact: true })
+      .selectOption('none')
+    await expect(stack.locator('[data-page-kind="contents"]')).toHaveCount(0)
+    await expect(stack.locator('[data-page-number="3"]')).toHaveAttribute(
+      'data-page-kind',
+      'content',
+    )
   })
 }
+
+test('booklet maps preserve the searched place, rectangle, and polygon', async ({
+  page,
+}) => {
+  await mockApi(page)
+  const areas = [
+    { kind: 'place' as const, id: 12 },
+    {
+      kind: 'rectangle' as const,
+      bounds: {
+        sw: { lat: 35.32, lng: -120.84 },
+        ne: { lat: 35.33, lng: -120.83 },
+      },
+    },
+    {
+      kind: 'polygon' as const,
+      points: [
+        { lat: 35.32, lng: -120.84 },
+        { lat: 35.32, lng: -120.83 },
+        { lat: 35.34, lng: -120.84 },
+      ],
+    },
+  ]
+  for (const area of areas) {
+    const settings = defaults()
+    settings.search.area = area
+    settings.view.printMode = 'booklet'
+    settings.view.layout = 'list'
+    await page.goto(`/?${encodeSettings(settings)}`)
+    await page
+      .getByRole('button', { name: 'Print options', exact: true })
+      .click()
+    const parameters = page.locator('.booklet-parameters-page')
+    await expect(parameters.locator('.print-map-canvas svg path')).toHaveCount(
+      1,
+    )
+    await expect(parameters.locator('.booklet-search-link')).toHaveAttribute(
+      'href',
+      `https://kylenessen.github.io/nearby-lifers/?${encodeSettings(settings)}`,
+    )
+    await expect(parameters).toContainText(
+      area.kind === 'place'
+        ? 'iNaturalist place 12'
+        : area.kind === 'polygon'
+          ? 'Polygon with 3 corners'
+          : 'Rectangle from',
+    )
+    expect(
+      await parameters.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+    ).toBe(false)
+  }
+})
+
+test('long contents paginate without losing groups or shifting their references', async ({
+  page,
+}) => {
+  await mockApi(page)
+  const manyGroups = Array.from({ length: 60 }, (_, index) => ({
+    ...species[index % species.length],
+    taxon: {
+      ...species[index % species.length].taxon,
+      id: index + 100,
+      iconic_taxon_name: 'Aves',
+      ancestors: [
+        {
+          id: index + 3000,
+          rank: 'family',
+          name: `Family${index}`,
+          preferred_common_name: `Group ${index} with a long descriptive taxonomic name for wrapping`,
+        },
+      ],
+    },
+  }))
+  await page.route(
+    'https://api.inaturalist.org/v1/observations/species_counts**',
+    (route) => {
+      const results = new URL(route.request().url()).searchParams.has('user_id')
+        ? []
+        : manyGroups
+      return route.fulfill({ json: { total_results: results.length, results } })
+    },
+  )
+  const settings = defaults()
+  settings.view.printMode = 'booklet'
+  settings.view.grouping = 'family'
+  settings.view.layout = 'list'
+  await page.goto(`/?${encodeSettings(settings)}`)
+  await page.getByRole('button', { name: 'Print options', exact: true }).click()
+  const stack = page.locator('.booklet-stack')
+  const contentsCount = await stack
+    .locator('[data-page-kind="contents"]')
+    .count()
+  expect(contentsCount).toBeGreaterThan(1)
+  await expect(stack.locator('.contents-entry')).toHaveCount(60)
+  const entries = await stack
+    .locator('.contents-entry')
+    .evaluateAll((rows) =>
+      rows.map((row) => ({
+        key: (row as HTMLElement).dataset.group!,
+        page: Number(row.querySelector('strong')!.textContent),
+      })),
+    )
+  for (const entry of entries) {
+    const slots = await stack
+      .locator(`[data-page-kind="content"]:has([data-group="${entry.key}"])`)
+      .evaluateAll((elements) =>
+        elements.map((el) => Number((el as HTMLElement).dataset.pageNumber)),
+      )
+    expect(entry.page).toBe(Math.min(...slots))
+  }
+  expect(
+    await stack
+      .locator('.booklet-contents')
+      .evaluateAll((sheets) =>
+        sheets.some((el) => el.scrollHeight > el.clientHeight + 1),
+      ),
+  ).toBe(false)
+})

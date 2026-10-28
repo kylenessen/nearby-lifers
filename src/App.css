@@ -359,6 +359,12 @@ fieldset legend {
   margin-bottom: 4px;
   overflow-wrap: anywhere;
 }
+.species-copy .species-group-label {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
 .species-copy a {
   text-decoration: none;
 }
@@ -758,5 +764,9 @@ fieldset legend {
   height: 12px;
 }
 
-.booklet-title-label { margin-top: 10px; }
-.booklet-title-label input { margin-top: 7px; }
+.booklet-title-label {
+  margin-top: 10px;
+}
+.booklet-title-label input {
+  margin-top: 7px;
+}

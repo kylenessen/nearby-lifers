@@ -14,7 +14,7 @@ import './App.css'
 import { LocationMap } from './LocationMap'
 import { UsernameField } from './UsernameField'
 import { PrintPreview } from './PrintPreview'
-import { groupSpecies, sortSpecies } from './presentation'
+import { groupSpecies } from './presentation'
 import {
   areaLabel,
   decodeSettings,
@@ -130,12 +130,14 @@ export default function App() {
     setPreview(false)
     void (async () => {
       let label = areaLabel(search.area, search.radius)
+      let searchedPlace: INatPlace | undefined
       if (search.area.kind === 'place') {
         const loaded = await fetchPlaceDetails(
           search.area.id,
           controller.signal,
         )
         label = loaded.display_name ?? loaded.name
+        searchedPlace = loaded
       }
       const result = await buildSnapshot(
         search,
@@ -143,7 +145,8 @@ export default function App() {
         controller.signal,
         setProgress,
       )
-      if (!controller.signal.aborted) setSnapshot(result)
+      if (!controller.signal.aborted)
+        setSnapshot({ ...result, place: searchedPlace })
     })()
       .catch((cause) => {
         if (!controller.signal.aborted) {
@@ -304,13 +307,22 @@ export default function App() {
       ) ?? [],
     [snapshot, view.hideCasual, view.hideUnexpected, view.showObserved],
   )
-  const visible = useMemo(
-    () => sortSpecies(filtered, view.sort),
-    [filtered, view.sort],
-  )
   const groups = useMemo(
-    () => groupSpecies(visible, { sort: view.sort, grouping: view.grouping }),
-    [visible, view.sort, view.grouping],
+    () => groupSpecies(filtered, { sort: view.sort, grouping: view.grouping }),
+    [filtered, view.sort, view.grouping],
+  )
+  const visible = useMemo(
+    () => groups.flatMap((group) => group.species),
+    [groups],
+  )
+  const speciesGroupLabels = useMemo(
+    () =>
+      new Map(
+        groups.flatMap((group) =>
+          group.species.map((s) => [s.id, group.label] as const),
+        ),
+      ),
+    [groups],
   )
   const found = snapshot?.species.filter((s) => s.observedByUser).length ?? 0
   const selectedAreaLabel =
@@ -321,7 +333,7 @@ export default function App() {
   async function print() {
     setPreview(true)
     setPrinting(true)
-    setPrintMessage('Preparing photos for print.')
+    setPrintMessage('Preparing photos and map for print.')
     // Wait for React to show the preview before asking the browser to print it.
     await new Promise((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(resolve)),
@@ -353,7 +365,7 @@ export default function App() {
     )
     setPrintMessage(
       loaded.some((v) => !v)
-        ? 'Some photos could not load. Their names will still print.'
+        ? 'Some images could not load. Names and the search boundary will still print.'
         : '',
     )
     setPrinting(false)
@@ -728,26 +740,26 @@ export default function App() {
                   </div>
                 </div>
                 <div className="view-options">
-                  {view.layout === 'list' && (
-                    <label>
-                      Group by
-                      <select
-                        value={view.grouping}
-                        onChange={(e) =>
-                          updateView({
-                            grouping: e.target.value as View['grouping'],
-                          })
-                        }
-                      >
-                        <option value="natural">Taxonomic groups</option>
-                        <option value="family">Families</option>
-                        <option value="order">Orders</option>
-                        <option value="none">None</option>
-                      </select>
-                    </label>
-                  )}
                   <label>
-                    Sort by
+                    Group by
+                    <select
+                      value={view.grouping}
+                      onChange={(e) =>
+                        updateView({
+                          grouping: e.target.value as View['grouping'],
+                        })
+                      }
+                    >
+                      <option value="natural">Taxonomic groups</option>
+                      <option value="family">Families</option>
+                      <option value="order">Orders</option>
+                      <option value="none">None</option>
+                    </select>
+                  </label>
+                  <label>
+                    {view.grouping === 'none'
+                      ? 'Sort by'
+                      : 'Sort within groups'}
                     <select
                       value={view.sort}
                       onChange={(e) =>
@@ -841,9 +853,9 @@ export default function App() {
                         </p>
                         <p className="hint">
                           Stack the sheets in order, fold to 5.5 × 8.5 inches,
-                          and staple along the fold. Stapling the spine needs at
-                          least 5.5 inches of reach. A long-reach stapler is
-                          suitable.
+                          and use the three staple guides along the fold. Each
+                          half-inch guide has two hole marks. Their centers are
+                          1.5 inches from either end and at the midpoint.
                         </p>
                       </>
                     ) : (
@@ -888,6 +900,7 @@ export default function App() {
                     {visible.map((species) => (
                       <article
                         className={`species-card ${species.observedByUser ? 'observed' : ''}`}
+                        data-group={speciesGroupLabels.get(species.id)}
                         key={species.id}
                       >
                         <div className="photo-frame">
@@ -917,6 +930,11 @@ export default function App() {
                           )}
                         </div>
                         <div className="species-copy">
+                          {view.grouping !== 'none' && (
+                            <p className="species-group-label">
+                              {speciesGroupLabels.get(species.id)}
+                            </p>
+                          )}
                           <h3>
                             <a
                               href={`https://www.inaturalist.org/taxa/${species.id}`}
