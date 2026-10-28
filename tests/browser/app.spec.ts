@@ -503,3 +503,134 @@ test('taxonomic grouping, all sort modes, and dense presentation survive a bookm
     page.getByRole('combobox', { name: 'Sort by', exact: true }),
   ).toHaveValue('frequency')
 })
+
+for (const layout of ['grid', 'list'] as const) {
+  test(`${layout} booklet prints landscape Letter with covers and every species in folding order`, async ({
+    page,
+  }) => {
+    await load(page)
+    await page
+      .getByRole('button', {
+        name: layout === 'list' ? 'Taxon checklist' : 'Photo grid',
+        exact: true,
+      })
+      .click()
+    await page.getByRole('button', { name: 'Print options' }).click()
+    await page
+      .getByRole('combobox', { name: 'Paper size', exact: true })
+      .selectOption('a6')
+    await page
+      .getByRole('combobox', { name: 'Density', exact: true })
+      .selectOption('dense')
+    await page
+      .getByRole('combobox', { name: 'Print as', exact: true })
+      .selectOption('booklet')
+    await expect(
+      page.getByRole('combobox', { name: 'Paper size', exact: true }),
+    ).toBeDisabled()
+    await page
+      .getByLabel('Cover title', { exact: true })
+      .fill('Morro Bay birds & other discoveries')
+    const stack = page.locator('.booklet-stack')
+    await expect(
+      stack.locator(layout === 'grid' ? '.print-card' : '.print-list-row'),
+    ).toHaveCount(42)
+    const sides = await stack
+      .locator('.booklet-side')
+      .evaluateAll((elements) =>
+        elements.map((side) =>
+          Array.from(side.querySelectorAll<HTMLElement>('.booklet-slot')).map(
+            (slot) => ({
+              number: Number(slot.dataset.pageNumber),
+              kind: slot.dataset.pageKind,
+            }),
+          ),
+        ),
+      )
+    const total = sides.length * 2
+    expect(total % 4).toBe(0)
+    expect(sides[0]).toEqual([
+      { number: total, kind: 'back-cover' },
+      { number: 1, kind: 'cover' },
+    ])
+    for (let sheet = 0; sheet < sides.length / 2; sheet++) {
+      expect(sides[sheet * 2].map((p) => p.number)).toEqual([
+        total - 2 * sheet,
+        1 + 2 * sheet,
+      ])
+      expect(sides[sheet * 2 + 1].map((p) => p.number)).toEqual([
+        2 + 2 * sheet,
+        total - 1 - 2 * sheet,
+      ])
+    }
+    const overflow = await stack.evaluate((el) =>
+      Array.from(el.querySelectorAll<HTMLElement>('.print-sheet')).some(
+        (sheet) => sheet.scrollHeight > sheet.clientHeight + 1,
+      ),
+    )
+    expect(overflow).toBe(false)
+    await expect(stack.locator('.booklet-cover h1')).toHaveText(
+      'Morro Bay birds & other discoveries',
+    )
+    expect(new URL(page.url()).searchParams.get('print')).toBe('booklet')
+    expect(new URL(page.url()).searchParams.get('title')).toBe(
+      'Morro Bay birds & other discoveries',
+    )
+    await page.evaluate(() => {
+      window.print = () => {
+        document.documentElement.dataset.printed = 'yes'
+      }
+    })
+    await page.getByRole('button', { name: 'Print or save PDF' }).click()
+    await expect(page.locator('html')).toHaveAttribute('data-printed', 'yes')
+    await stack
+      .locator('.booklet-side')
+      .first()
+      .screenshot({ path: `test-results/booklet-${layout}-cover.png` })
+    await stack
+      .locator('.booklet-side')
+      .nth(1)
+      .screenshot({ path: `test-results/booklet-${layout}-inside.png` })
+    await page.emulateMedia({ media: 'print' })
+    await expect(stack.locator('[data-page-kind="back-cover"]')).toHaveText(
+      'Blank back cover',
+    )
+    expect(
+      await stack.locator('[data-page-kind="back-cover"]').innerText(),
+    ).toBe('')
+    const pdf = (
+      await page.pdf({
+        path: `test-results/booklet-${layout}.pdf`,
+        preferCSSPageSize: true,
+        printBackground: true,
+      })
+    ).toString('latin1')
+    expect(pdf.match(/\/Type \/Page\b/g)?.length).toBe(sides.length)
+    const dimensions = pdf.match(
+      /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)/,
+    )!
+    expect(Math.abs(Number(dimensions[1]) - 792)).toBeLessThan(1)
+    expect(Math.abs(Number(dimensions[2]) - 612)).toBeLessThan(1)
+    await page.emulateMedia({ media: 'screen' })
+    await page
+      .getByRole('combobox', { name: 'Print as', exact: true })
+      .selectOption('sheets')
+    await expect(
+      page.getByRole('combobox', { name: 'Paper size', exact: true }),
+    ).toHaveValue('a6')
+    await page
+      .getByRole('combobox', { name: 'Print as', exact: true })
+      .selectOption('booklet')
+    await page.reload()
+    await expect(
+      page.getByText('42 species shown', { exact: true }),
+    ).toBeVisible()
+    await page.getByRole('button', { name: 'Print options' }).click()
+    await expect(
+      page.getByRole('combobox', { name: 'Print as', exact: true }),
+    ).toHaveValue('booklet')
+    await expect(page.getByLabel('Cover title', { exact: true })).toHaveValue(
+      'Morro Bay birds & other discoveries',
+    )
+  })
+}

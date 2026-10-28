@@ -71,6 +71,8 @@ export type View = {
   density: 'comfortable' | 'compact' | 'large' | 'dense'
   sort: 'common' | 'scientific' | 'frequency'
   grouping: 'natural' | 'family' | 'order' | 'none'
+  printMode: 'sheets' | 'booklet'
+  bookletTitle: string
 }
 export type Settings = { search: Search; view: View }
 export const DEFAULT_CENTER = { lat: 35.327632, lng: -120.839097 }
@@ -98,6 +100,8 @@ export function defaults(date = new Date()): Settings {
       density: 'comfortable',
       sort: 'frequency',
       grouping: 'natural',
+      printMode: 'sheets',
+      bookletTitle: 'Nearby Lifers',
     },
   }
 }
@@ -282,6 +286,8 @@ export function encodeSettings({ search, view }: Settings) {
   p.set('density', view.density)
   p.set('sort', view.sort)
   p.set('grouping', view.grouping)
+  p.set('print', view.printMode)
+  if (view.bookletTitle !== 'Nearby Lifers') p.set('title', view.bookletTitle)
   return p.toString()
 }
 export function decodeSettings(query: string, date = new Date()): Settings {
@@ -343,6 +349,8 @@ export function decodeSettings(query: string, date = new Date()): Settings {
     view.sort = p.get('sort') as View['sort']
   if (['natural', 'family', 'order', 'none'].includes(p.get('grouping') ?? ''))
     view.grouping = p.get('grouping') as View['grouping']
+  if (p.get('print') === 'booklet') view.printMode = 'booklet'
+  if (p.has('title')) view.bookletTitle = p.get('title')!.slice(0, 120)
   const error = validateSearch(search)
   if (error) throw new Error(error)
   return settings

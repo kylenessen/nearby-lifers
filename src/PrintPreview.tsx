@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { MONTHS, PAPERS } from './search'
 import { groupSpecies } from './presentation'
+import { bookletPlan } from './booklet'
 import type { View } from './search'
 import type { Snapshot, Species } from './inaturalist'
 import { gridShape, packList } from './print-layout'
@@ -65,20 +66,22 @@ function Row({ species }: { species: Species }) {
   )
 }
 export function PrintPreview({ snapshot, species, view, visible }: Props) {
-  const paper = PAPERS[view.paper]
-  const { columns, rows } = gridShape(view.paper, view.density)
+  const booklet = view.printMode === 'booklet'
+  const paperKey = booklet ? 'half' : view.paper
+  const paper = PAPERS[paperKey]
+  const { columns, rows } = gridShape(paperKey, view.density)
   const listColumns =
-    view.paper === 'letter'
+    paperKey === 'letter'
       ? ['compact', 'dense'].includes(view.density)
         ? 3
         : 2
-      : ['compact', 'dense'].includes(view.density) && view.paper !== 'a6'
+      : ['compact', 'dense'].includes(view.density) && paperKey !== 'a6'
         ? 2
         : 1
   const measure = useRef<HTMLDivElement>(null)
   const [packed, setPacked] = useState<ListColumn[]>([])
   const groups = useMemo(
-    () => groupSpecies(species, view),
+    () => groupSpecies(species, { sort: view.sort, grouping: view.grouping }),
     [species, view.grouping, view.sort],
   )
   const groupLabels = useMemo(
@@ -124,7 +127,7 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
       height: row.getBoundingClientRect().height,
     }))
     setPacked(packList(items, capacity, headings))
-  }, [groups, speciesGroups, view.layout, view.paper, view.density, snapshot])
+  }, [groups, speciesGroups, view.layout, paperKey, view.density, snapshot])
 
   const pages: Species[][] = []
   for (let i = 0; i < species.length; i += columns * rows)
@@ -133,6 +136,7 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
   for (let i = 0; i < packed.length; i += listColumns)
     listPages.push(packed.slice(i, i + listColumns))
   const pageCount = view.layout === 'grid' ? pages.length : listPages.length
+  const plan = bookletPlan(pageCount)
   const date = new Date(snapshot.builtAt).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'short',
@@ -142,7 +146,8 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
     <footer className="sheet-footer">
       <span>iNaturalist records · {date}</span>
       <span>
-        {index + 1} / {pageCount}
+        {booklet ? index + 2 : index + 1} /{' '}
+        {booklet ? plan.totalPages : pageCount}
       </span>
     </footer>
   )
@@ -150,18 +155,89 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
     <Header snapshot={snapshot} count={species.length} view={view} />
   )
 
+  const contentPages =
+    view.layout === 'grid'
+      ? pages.map((page, index) => (
+          <article
+            className="print-sheet"
+            data-content-index={index}
+            key={index}
+          >
+            {header}
+            <div className="sheet-body print-grid">
+              {page.map((s) => (
+                <div className="print-card" data-species-id={s.id} key={s.id}>
+                  <div className="print-photo">
+                    {s.photoUrl && (
+                      <img
+                        src={s.photoUrl}
+                        alt=""
+                        loading={visible ? 'eager' : 'lazy'}
+                        onError={(e) => {
+                          e.currentTarget.style.visibility = 'hidden'
+                        }}
+                      />
+                    )}
+                    <span className="paper-checkbox">
+                      {s.observedByUser ? '✓' : ''}
+                    </span>
+                  </div>
+                  <div className="print-names">
+                    <strong>{s.commonName}</strong>
+                    <i>{s.scientificName}</i>
+                  </div>
+                  <small className="print-credit">
+                    {s.photoCredit ?? 'Photo unavailable'}
+                  </small>
+                </div>
+              ))}
+            </div>
+            {footer(index)}
+          </article>
+        ))
+      : listPages.map((page, index) => (
+          <article
+            className="print-sheet"
+            data-content-index={index}
+            key={index}
+          >
+            {header}
+            <div className="sheet-body print-list-columns">
+              {page.map((column, columnIndex) => (
+                <div className="print-list-column" key={columnIndex}>
+                  {column.map((group, i) => (
+                    <section key={i}>
+                      {groupLabels.get(group.group) && (
+                        <h3 className="print-group-heading">
+                          {groupLabels.get(group.group)}
+                        </h3>
+                      )}
+                      {group.ids.map((id) => (
+                        <Row key={id} species={byId.get(id)!} />
+                      ))}
+                    </section>
+                  ))}
+                </div>
+              ))}
+            </div>
+            {footer(index)}
+          </article>
+        ))
+
   return (
     <section
-      className={`print-output ${visible ? 'preview-visible' : ''} density-${view.density} paper-${view.paper}`}
+      className={`print-output ${visible ? 'preview-visible' : ''} density-${view.density} paper-${paperKey} ${booklet ? 'booklet-output' : ''}`}
       style={style}
       aria-label="Printable field sheets"
       aria-hidden={!visible}
     >
-      <style>{`@page { size: ${paper.width}mm ${paper.height}mm; margin: 0; }`}</style>
+      <style>{`@page { size: ${booklet ? 279.4 : paper.width}mm ${booklet ? 215.9 : paper.height}mm; margin: 0; }`}</style>
       {visible && (
         <p className="preview-caption screen-only">
-          {paper.label} · {paper.dimensions} · {pageCount}{' '}
-          {pageCount === 1 ? 'page' : 'pages'} ·{' '}
+          {booklet
+            ? `Letter booklet · ${plan.sheets} sheets · ${plan.totalPages} folded pages`
+            : `${paper.label} · ${paper.dimensions} · ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}`}{' '}
+          ·{' '}
           {view.layout === 'grid'
             ? `${columns} × ${rows} photo grid`
             : 'Grouped checklist'}
@@ -194,66 +270,63 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
           </div>
         </div>
       )}
-      <div className="sheet-stack">
-        {view.layout === 'grid'
-          ? pages.map((page, index) => (
-              <article className="print-sheet" key={index}>
-                {header}
-                <div className="sheet-body print-grid">
-                  {page.map((s) => (
-                    <div className="print-card" key={s.id}>
-                      <div className="print-photo">
-                        {s.photoUrl && (
-                          <img
-                            src={s.photoUrl}
-                            alt=""
-                            loading={visible ? 'eager' : 'lazy'}
-                            onError={(e) => {
-                              e.currentTarget.style.visibility = 'hidden'
-                            }}
-                          />
-                        )}
-                        <span className="paper-checkbox">
-                          {s.observedByUser ? '✓' : ''}
-                        </span>
-                      </div>
-                      <div className="print-names">
-                        <strong>{s.commonName}</strong>
-                        <i>{s.scientificName}</i>
-                      </div>
-                      <small className="print-credit">
-                        {s.photoCredit ?? 'Photo unavailable'}
-                      </small>
-                    </div>
-                  ))}
-                </div>
-                {footer(index)}
-              </article>
-            ))
-          : listPages.map((page, index) => (
-              <article className="print-sheet" key={index}>
-                {header}
-                <div className="sheet-body print-list-columns">
-                  {page.map((column, columnIndex) => (
-                    <div className="print-list-column" key={columnIndex}>
-                      {column.map((group, i) => (
-                        <section key={i}>
-                          {groupLabels.get(group.group) && (
-                            <h3 className="print-group-heading">
-                              {groupLabels.get(group.group)}
-                            </h3>
+      <div className={`sheet-stack ${booklet ? 'booklet-stack' : ''}`}>
+        {booklet
+          ? plan.sides.map((side) => (
+              <section
+                className="booklet-sheet-wrapper"
+                key={`${side.sheet}-${side.side}`}
+              >
+                <p className="booklet-side-label screen-only">
+                  Sheet {side.sheet} ·{' '}
+                  {side.side === 'front' ? 'Front' : 'Back'} · Pages{' '}
+                  {side.pages.map((p) => p.number).join(' and ')}
+                </p>
+                <div
+                  className="booklet-side"
+                  data-sheet={side.sheet}
+                  data-side={side.side}
+                >
+                  {side.pages.map((page) => (
+                    <div
+                      className="booklet-slot"
+                      key={page.number}
+                      data-page-number={page.number}
+                      data-page-kind={page.kind}
+                    >
+                      {page.kind === 'content' ? (
+                        contentPages[page.contentIndex]
+                      ) : (
+                        <article
+                          className={`print-sheet ${page.kind === 'cover' ? 'booklet-cover' : 'booklet-blank'}`}
+                        >
+                          {page.kind === 'cover' ? (
+                            <>
+                              <h1>
+                                {view.bookletTitle.trim() || 'Nearby Lifers'}
+                              </h1>
+                              <p>{snapshot.areaLabel}</p>
+                              <p>
+                                {snapshot.users
+                                  .map((user) => user.login)
+                                  .join(', ')}
+                              </p>
+                            </>
+                          ) : (
+                            <span className="blank-page-label screen-only">
+                              {page.kind === 'back-cover'
+                                ? 'Blank back cover'
+                                : 'Blank page'}
+                            </span>
                           )}
-                          {group.ids.map((id) => (
-                            <Row key={id} species={byId.get(id)!} />
-                          ))}
-                        </section>
-                      ))}
+                        </article>
+                      )}
                     </div>
                   ))}
                 </div>
-                {footer(index)}
-              </article>
-            ))}
+              </section>
+            ))
+          : contentPages}
       </div>
     </section>
   )

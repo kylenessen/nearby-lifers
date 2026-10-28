@@ -757,3 +757,6 @@ fieldset legend {
   width: 12px;
   height: 12px;
 }
+
+.booklet-title-label { margin-top: 10px; }
+.booklet-title-label input { margin-top: 7px; }

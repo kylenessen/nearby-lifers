@@ -43,6 +43,8 @@ test('every area and every view option round trips through a portable link', () 
       density: 'dense',
       sort: 'scientific',
       grouping: 'family',
+      printMode: 'booklet',
+      bookletTitle: 'Ducks & geese near Morro Bay',
     })
     assert.deepEqual(decodeSettings(encodeSettings(settings)), settings)
   }

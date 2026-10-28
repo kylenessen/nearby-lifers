@@ -309,7 +309,7 @@ export default function App() {
     [filtered, view.sort],
   )
   const groups = useMemo(
-    () => groupSpecies(visible, view),
+    () => groupSpecies(visible, { sort: view.sort, grouping: view.grouping }),
     [visible, view.sort, view.grouping],
   )
   const found = snapshot?.species.filter((s) => s.observedByUser).length ?? 0
@@ -784,9 +784,27 @@ export default function App() {
                     <h3>Print settings</h3>
                     <div className="print-options">
                       <label>
+                        Print as
+                        <select
+                          value={view.printMode}
+                          onChange={(event) =>
+                            updateView({
+                              printMode: event.target
+                                .value as View['printMode'],
+                            })
+                          }
+                        >
+                          <option value="sheets">Individual sheets</option>
+                          <option value="booklet">Folded booklet</option>
+                        </select>
+                      </label>
+                      <label>
                         Paper size
                         <select
-                          value={view.paper}
+                          value={
+                            view.printMode === 'booklet' ? 'letter' : view.paper
+                          }
+                          disabled={view.printMode === 'booklet'}
                           onChange={(e) =>
                             updateView({
                               paper: e.target.value as View['paper'],
@@ -801,11 +819,40 @@ export default function App() {
                         </select>
                       </label>
                     </div>
-                    <p className="hint">
-                      The preview below uses your visible species and selected
-                      format. Match the paper size in your print dialog, use
-                      100% scale, and turn off browser headers and footers.
-                    </p>
+                    {view.printMode === 'booklet' ? (
+                      <>
+                        <label className="booklet-title-label">
+                          Cover title
+                          <input
+                            value={view.bookletTitle}
+                            maxLength={120}
+                            placeholder="Nearby Lifers"
+                            onChange={(event) =>
+                              updateView({ bookletTitle: event.target.value })
+                            }
+                          />
+                        </label>
+                        <p className="hint">
+                          Print on Letter paper in landscape, double-sided,
+                          flipping on the short edge. Use 100% scale and turn
+                          off browser headers and footers. The pages are already
+                          arranged for folding, so leave your printer’s booklet
+                          and multiple-pages-per-sheet options off.
+                        </p>
+                        <p className="hint">
+                          Stack the sheets in order, fold to 5.5 × 8.5 inches,
+                          and staple along the fold. Stapling the spine needs at
+                          least 5.5 inches of reach. A long-reach stapler is
+                          suitable.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="hint">
+                        The preview below uses your visible species and selected
+                        format. Match the paper size in your print dialog, use
+                        100% scale, and turn off browser headers and footers.
+                      </p>
+                    )}
                     <button
                       type="button"
                       className="primary"
