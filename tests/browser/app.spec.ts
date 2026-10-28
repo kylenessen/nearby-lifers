@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { defaults, encodeSettings, PAPERS } from '../../src/search'
-import jsQR from 'jsqr'
 import type { Paper, View } from '../../src/search'
 
 const fontSizes = { dense: 6, compact: 8, comfortable: 10, large: 12 }
@@ -29,28 +28,6 @@ function gridShape(paper: Paper, density: View['density']) {
           }
   const [columns, rows] = shapes[density]
   return { columns, rows }
-}
-
-async function decodeSearchQr(page: Page) {
-  const graphic = await page
-    .locator('.booklet-stack .booklet-search-qr')
-    .evaluate((svg) => ({
-      size: Number(svg.getAttribute('viewBox')!.split(' ')[2]),
-      path: svg.querySelector('path')!.getAttribute('d')!,
-    }))
-  const scale = Math.floor((44 * 300) / 25.4 / graphic.size)
-  const width = graphic.size * scale
-  const pixels = new Uint8ClampedArray(width * width * 4).fill(255)
-  for (const match of graphic.path.matchAll(/M(\d+) (\d+)h1v1h-1z/g)) {
-    const x = Number(match[1]),
-      y = Number(match[2])
-    for (let dy = 0; dy < scale; dy++)
-      for (let dx = 0; dx < scale; dx++) {
-        const start = ((y * scale + dy) * width + x * scale + dx) * 4
-        pixels.fill(0, start, start + 3)
-      }
-  }
-  return jsQR(pixels, width, width)?.data
 }
 
 const names = [
@@ -665,7 +642,7 @@ for (const layout of ['grid', 'list'] as const) {
     )
     const parameters = stack.locator('[data-page-number="2"]')
     await expect(parameters).toHaveAttribute('data-page-kind', 'parameters')
-    await expect(parameters).toContainText('Booklet search filters')
+    await expect(parameters).toContainText('Search Filters')
     await expect(
       stack
         .locator('.booklet-parameters')
@@ -870,9 +847,12 @@ test('booklet maps preserve the searched place, rectangle, and polygon', async (
     await expect(parameters.locator('.print-map-canvas svg path')).toHaveCount(
       1,
     )
-    await expect(parameters.locator('.booklet-search-access a')).toHaveCount(0)
-    expect(await decodeSearchQr(page)).toBe(
-      `https://kylenessen.github.io/nearby-lifers/?${encodeSettings(settings)}`,
+    await expect(parameters).toHaveCount(1)
+    await expect(
+      parameters.locator('.booklet-search-qr, .booklet-search-access'),
+    ).toHaveCount(0)
+    await expect(parameters.locator('.booklet-page-title')).toHaveText(
+      'Search Filters',
     )
     await expect(
       parameters.locator('.booklet-parameters').filter({ hasText: 'Area' }),
@@ -1039,14 +1019,26 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
           const records = card
             .querySelector('.print-records')!
             .getBoundingClientRect()
-          const names = card
-            .querySelector('.print-names')!
-            .getBoundingClientRect()
           if (
-            records.top < names.bottom - 1 ||
-            card.querySelector('.print-photo .print-records')
+            records.top < photo.top ||
+            records.bottom > photo.bottom ||
+            records.right > photo.right ||
+            records.left < photo.left
           )
-            errors.push('records are not below the names')
+            errors.push('record badge is outside the photo')
+          if (
+            Math.abs(photo.right - records.right - 96 / 25.4) > 1 ||
+            Math.abs(photo.bottom - records.bottom - 96 / 25.4) > 1
+          )
+            errors.push('record badge is not at the bottom right')
+          const badgeStyle = getComputedStyle(
+            card.querySelector('.print-records')!,
+          )
+          if (
+            badgeStyle.backgroundColor !== 'rgb(255, 255, 255)' ||
+            badgeStyle.opacity !== '1'
+          )
+            errors.push('record badge background is not opaque white')
           if (photo.height < (8 * 96) / 25.4 - 1) errors.push('photo too short')
           const color = getComputedStyle(
             card.querySelector('.print-card-group')!,
@@ -1135,7 +1127,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
     contents: getComputedStyle(root.querySelector('.contents-entry')!).fontSize,
   }))
   expect(supportingSizes).toEqual({
-    filters: '16px',
+    filters: '12px',
     footer: '12px',
     contents: '16px',
   })
@@ -1216,11 +1208,20 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
             Math.abs(photo.bottom - peerPhoto.bottom) > 1
           )
             errors.push('photos do not align within their row')
+          const barStyle = getComputedStyle(
+            card.querySelector('.print-card-group')!,
+          )
+          const singleLine =
+            parseFloat(barStyle.lineHeight) +
+            parseFloat(barStyle.paddingTop) +
+            parseFloat(barStyle.paddingBottom)
+          if (Math.abs(photo.top - group.top - singleLine) > 1)
+            errors.push('group bar reserves more than one line')
           if (
-            Math.abs(group.bottom - photo.top) > 1 ||
+            group.bottom < photo.top - 1 ||
             Math.abs(group.width - photo.width) > 1
           )
-            errors.push('group bar does not touch the photo')
+            errors.push('group bar does not cover the top of the photo')
           if (names.top < photo.bottom || names.top - photo.bottom > 6)
             errors.push('names are not just below the photo')
           if (parseFloat(getComputedStyle(card).borderTopWidth) > 0)
@@ -1312,9 +1313,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
   ).toBe(searchRequests)
   expect(new URL(page.url()).searchParams.get('columns')).toBe('4')
   expect(new URL(page.url()).searchParams.get('rows')).toBe('4')
-  const searchUrl = await decodeSearchQr(page)
-  expect(new URL(searchUrl!).search).toBe(new URL(page.url()).search)
-  expect(new URL(searchUrl!).searchParams.get('font_size')).toBe('8')
+  expect(new URL(page.url()).searchParams.get('font_size')).toBe('8')
   await page.reload()
   await page.getByRole('button', { name: 'Print options', exact: true }).click()
   await expect(textSize).toHaveValue('8')
@@ -1326,8 +1325,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
     .screenshot({ path: 'test-results/booklet-photo-gallery.png' })
   await stack
     .locator('.booklet-parameters-page')
-    .filter({ has: page.locator('.booklet-search-qr') })
-    .screenshot({ path: 'test-results/booklet-search-qr.png' })
+    .screenshot({ path: 'test-results/booklet-search-filters.png' })
   const sides = await stack.locator('.booklet-side').count()
   await page.emulateMedia({ media: 'print' })
   const pdf = await page.pdf({
@@ -1338,7 +1336,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
   expect(pdf.toString('latin1').match(/\/Type \/Page\b/g)?.length).toBe(sides)
 })
 
-test('an oversized polygon QR keeps the booklet usable and explains how to save its link', async ({
+test('detailed polygon filters stay on one page with all settings at nine points', async ({
   page,
 }) => {
   await mockApi(page)
@@ -1355,11 +1353,26 @@ test('an oversized polygon QR keeps the booklet usable and explains how to save 
   await page.goto(`/?${query}`)
   await page.getByRole('button', { name: 'Print options', exact: true }).click()
   const parameters = page.locator('.booklet-stack .booklet-parameters-page')
-  await expect(parameters.first()).toContainText('Booklet search filters')
+  await expect(parameters.first()).toContainText('Search Filters')
   await expect(parameters.locator('.booklet-search-qr')).toHaveCount(0)
-  await expect(parameters.locator('.booklet-qr-unavailable')).toContainText(
-    'too long for one QR code',
-  )
+  await expect(parameters).toHaveCount(1)
+  await expect(parameters.locator('.booklet-parameters dt')).toHaveCount(11)
+  expect(
+    await parameters
+      .locator('.booklet-parameters')
+      .evaluate((el) => getComputedStyle(el).fontSize),
+  ).toBe('12px')
+  expect(
+    await parameters.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+  ).toBe(false)
+  expect(
+    await parameters.evaluate(
+      (el) =>
+        el.querySelector('.booklet-parameters')!.getBoundingClientRect()
+          .bottom >
+        el.querySelector('.sheet-footer')!.getBoundingClientRect().top,
+    ),
+  ).toBe(false)
   await expect(parameters.locator('.booklet-search-access a')).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: 'Print or save PDF' }),
