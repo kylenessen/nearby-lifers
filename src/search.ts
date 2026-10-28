@@ -69,8 +69,9 @@ export type View = {
   layout: 'grid' | 'list'
   paper: Paper
   density: 'comfortable' | 'compact' | 'large' | 'dense'
-  gridColumns: number | null
-  gridRows: number | null
+  gridColumns: number
+  gridRows: number
+  gridFontSize: number
   sort: 'common' | 'scientific' | 'frequency'
   grouping: 'natural' | 'family' | 'order' | 'none'
   printMode: 'sheets' | 'booklet'
@@ -102,8 +103,9 @@ export function defaults(date = new Date()): Settings {
       layout: 'grid',
       paper: 'letter',
       density: 'comfortable',
-      gridColumns: null,
-      gridRows: null,
+      gridColumns: 3,
+      gridRows: 4,
+      gridFontSize: 10,
       sort: 'frequency',
       grouping: 'natural',
       printMode: 'sheets',
@@ -292,8 +294,9 @@ export function encodeSettings({ search, view }: Settings) {
   p.set('layout', view.layout)
   p.set('paper', view.paper)
   p.set('density', view.density)
-  if (view.gridColumns !== null) p.set('columns', String(view.gridColumns))
-  if (view.gridRows !== null) p.set('rows', String(view.gridRows))
+  p.set('columns', String(view.gridColumns ?? 3))
+  p.set('rows', String(view.gridRows ?? 4))
+  p.set('font_size', String(view.gridFontSize ?? 10))
   p.set('sort', view.sort)
   p.set('grouping', view.grouping)
   p.set('print', view.printMode)
@@ -364,6 +367,9 @@ export function decodeSettings(query: string, date = new Date()): Settings {
     const value = Number(p.get(parameter))
     if (Number.isInteger(value) && value >= 1 && value <= 8) view[key] = value
   }
+  const fontSize = Number(p.get('font_size'))
+  if (Number.isInteger(fontSize) && fontSize >= 6 && fontSize <= 24)
+    view.gridFontSize = fontSize
   if (['common', 'scientific', 'frequency'].includes(p.get('sort') ?? ''))
     view.sort = p.get('sort') as View['sort']
   if (['natural', 'family', 'order', 'none'].includes(p.get('grouping') ?? ''))

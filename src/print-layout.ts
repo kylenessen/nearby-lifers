@@ -1,4 +1,4 @@
-import type { Paper, View } from './search.ts'
+import type { View } from './search.ts'
 
 // ColorBrewer Pastel1, as published by d3-scale-chromatic.
 // https://d3js.org/d3-scale-chromatic/categorical#schemePastel1
@@ -27,34 +27,10 @@ export function packGrid(
   return pages
 }
 export function printGrid(view: View) {
-  const preset = gridShape(
-    view.printMode === 'booklet' ? 'half' : view.paper,
-    view.density,
-  )
   return {
-    columns: view.gridColumns ?? preset.columns,
-    rows: view.gridRows ?? preset.rows,
+    columns: view.gridColumns ?? 3,
+    rows: view.gridRows ?? 4,
   }
-}
-export function gridShape(paper: Paper, density: View['density']) {
-  const shapes = {
-    letter: {
-      dense: [5, 6],
-      compact: [4, 5],
-      comfortable: [3, 4],
-      large: [2, 3],
-    },
-    half: {
-      dense: [4, 4],
-      compact: [3, 4],
-      comfortable: [2, 3],
-      large: [2, 2],
-    },
-    a5: { dense: [4, 4], compact: [3, 4], comfortable: [2, 3], large: [2, 2] },
-    a6: { dense: [2, 4], compact: [2, 3], comfortable: [2, 2], large: [1, 2] },
-  }
-  const [columns, rows] = shapes[paper][density]
-  return { columns, rows }
 }
 export type ListItem = { id: number; group: string; height: number }
 export type ListColumn = { group: string; ids: number[] }[]

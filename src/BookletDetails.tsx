@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { encodeSettings, GROUPS, MONTHS } from './search'
 import type { View } from './search'
 import type { Snapshot } from './inaturalist'
@@ -6,20 +7,37 @@ import { PrintMap } from './PrintMap'
 import { printGrid } from './print-layout'
 
 const websiteQr = qrGraphic(PUBLIC_SITE_URL)
+function QrImage({
+  graphic,
+  className,
+  label,
+}: {
+  graphic: ReturnType<typeof qrGraphic>
+  className: string
+  label: string
+}) {
+  return (
+    <svg
+      className={className}
+      viewBox={`0 0 ${graphic.size} ${graphic.size}`}
+      role="img"
+      aria-label={label}
+      shapeRendering="crispEdges"
+    >
+      <rect width={graphic.size} height={graphic.size} fill="white" />
+      <path d={graphic.path} fill="black" />
+    </svg>
+  )
+}
 export function BookletBack() {
   return (
     <div className="booklet-credit">
       <a href={PUBLIC_SITE_URL} aria-label="Open Nearby Lifers website">
-        <svg
+        <QrImage
+          graphic={websiteQr}
           className="booklet-qr"
-          viewBox={`0 0 ${websiteQr.size} ${websiteQr.size}`}
-          role="img"
-          aria-label="QR code for Nearby Lifers"
-          shapeRendering="crispEdges"
-        >
-          <rect width={websiteQr.size} height={websiteQr.size} fill="white" />
-          <path d={websiteQr.path} fill="black" />
-        </svg>
+          label="QR code for Nearby Lifers"
+        />
       </a>
       <p>Generated with the Nearby Lifers tool</p>
       <a href={PUBLIC_SITE_URL}>kylenessen.github.io/nearby-lifers</a>
@@ -37,6 +55,15 @@ export function BookletParameters({
   count: number
 }) {
   const { search } = snapshot
+  const searchUrl = `${PUBLIC_SITE_URL}?${encodeSettings({ search, view })}`
+  const searchQr = useMemo(() => {
+    try {
+      return qrGraphic(searchUrl)
+    } catch {
+      // Very detailed polygons can exceed the QR format's capacity.
+      return null
+    }
+  }, [searchUrl])
   const { area } = search
   const areaDetails =
     area.kind === 'circle'
@@ -90,13 +117,32 @@ export function BookletParameters({
     ],
     [
       'Format',
-      `${view.layout === 'grid' ? `${printGrid(view).columns} columns × ${printGrid(view).rows} rows, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : 'Checklist'}. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
+      `${view.layout === 'grid' ? `${printGrid(view).columns} columns × ${printGrid(view).rows} rows. ${view.gridFontSize ?? 10} pt. Square photos, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : `Checklist. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}`}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
     ],
   ]
   return (
     <>
-      <h2 className="booklet-page-title">This search</h2>
-      <PrintMap snapshot={snapshot} />
+      <h2 className="booklet-page-title">Booklet search filters</h2>
+      <div className="booklet-search-overview">
+        <PrintMap snapshot={snapshot} />
+        <div className="booklet-search-access">
+          <a className="booklet-search-link" href={searchUrl}>
+            {searchQr && (
+              <QrImage
+                graphic={searchQr}
+                className="booklet-search-qr"
+                label="QR code to reopen this exact search"
+              />
+            )}
+            Reopen this exact search
+          </a>
+          {!searchQr && (
+            <p className="booklet-qr-unavailable">
+              This search is too long for one QR code. Use the link in the PDF.
+            </p>
+          )}
+        </div>
+      </div>
       <dl className="booklet-parameters">
         {parameters.map(([label, value]) => (
           <div key={label}>
@@ -105,12 +151,6 @@ export function BookletParameters({
           </div>
         ))}
       </dl>
-      <a
-        className="booklet-search-link"
-        href={`${PUBLIC_SITE_URL}?${encodeSettings({ search, view })}`}
-      >
-        Reopen this exact search
-      </a>
     </>
   )
 }

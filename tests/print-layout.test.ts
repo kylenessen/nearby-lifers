@@ -1,14 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  gridShape,
-  printGrid,
-  packGrid,
-  packList,
-} from '../src/print-layout.ts'
+import { printGrid, packGrid, packList } from '../src/print-layout.ts'
 import { defaults, PAPERS } from '../src/search.ts'
 import type { Paper, View } from '../src/search.ts'
-test('every sheet and density has a usable grid', () => {
+test('every sheet and density defaults to three columns and four rows', () => {
   for (const paper of Object.keys(PAPERS) as Paper[])
     for (const density of [
       'compact',
@@ -16,8 +11,10 @@ test('every sheet and density has a usable grid', () => {
       'large',
       'dense',
     ] as View['density'][]) {
-      const { columns, rows } = gridShape(paper, density)
-      assert.ok(columns > 0 && rows > 0)
+      const view = { ...defaults().view, paper, density }
+      assert.deepEqual(printGrid(view), { columns: 3, rows: 4 })
+      view.printMode = 'booklet'
+      assert.deepEqual(printGrid(view), { columns: 3, rows: 4 })
     }
 })
 test('custom photo grids fill every page except the last without losing species', () => {
@@ -45,9 +42,6 @@ test('explicit print grids survive paper, mode, and text-size changes', () => {
     view.printMode = 'booklet'
     assert.deepEqual(printGrid(view), { columns: 3, rows: 4 })
   }
-  view.gridColumns = null
-  view.gridRows = null
-  assert.deepEqual(printGrid(view), gridShape('half', 'large'))
 })
 test('measured checklist packing repeats headings and never loses a species', () => {
   const items = Array.from({ length: 29 }, (_, i) => ({

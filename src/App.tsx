@@ -56,12 +56,14 @@ function writeUrl(settings: Settings, push = false) {
 }
 function NumberField({
   label,
+  min = 1,
   max,
   className,
   value,
   onChange,
 }: {
   label: string
+  min?: number
   max: number
   className?: string
   value: number
@@ -76,7 +78,7 @@ function NumberField({
       {label}
       <input
         type="number"
-        min="1"
+        min={min}
         max={max}
         step="1"
         value={draft}
@@ -84,7 +86,12 @@ function NumberField({
           const text = event.target.value
           setDraft(text)
           const number = Number(text)
-          if (text && Number.isInteger(number) && number >= 1 && number <= max)
+          if (
+            text &&
+            Number.isInteger(number) &&
+            number >= min &&
+            number <= max
+          )
             onChange(number)
         }}
         onBlur={() => setDraft(String(value))}
@@ -812,30 +819,24 @@ export default function App() {
                       <option value="scientific">Scientific name</option>
                     </select>
                   </label>
-                  <label>
-                    {preview && view.layout === 'grid'
-                      ? 'Photo grid text size'
-                      : 'Density'}
-                    <select
-                      value={view.density}
-                      onChange={(e) =>
-                        updateView({
-                          ...(preview && view.layout === 'grid'
-                            ? {
-                                gridColumns: printGrid(view).columns,
-                                gridRows: printGrid(view).rows,
-                              }
-                            : {}),
-                          density: e.target.value as View['density'],
-                        })
-                      }
-                    >
-                      <option value="large">Large</option>
-                      <option value="comfortable">Comfortable</option>
-                      <option value="compact">Compact</option>
-                      <option value="dense">Extra compact</option>
-                    </select>
-                  </label>
+                  {!(preview && view.layout === 'grid') && (
+                    <label>
+                      Density
+                      <select
+                        value={view.density}
+                        onChange={(e) =>
+                          updateView({
+                            density: e.target.value as View['density'],
+                          })
+                        }
+                      >
+                        <option value="large">Large</option>
+                        <option value="comfortable">Comfortable</option>
+                        <option value="compact">Compact</option>
+                        <option value="dense">Extra compact</option>
+                      </select>
+                    </label>
+                  )}
                 </div>
                 {preview && (
                   <section
@@ -899,10 +900,19 @@ export default function App() {
                               updateView({ gridRows: value })
                             }
                           />
+                          <NumberField
+                            label="Font size (pt)"
+                            min={6}
+                            max={24}
+                            value={view.gridFontSize ?? 10}
+                            onChange={(value) =>
+                              updateView({ gridFontSize: value })
+                            }
+                          />
                         </div>
                         <p className="hint">
-                          Cells fill the page. Photos keep their proportions,
-                          with white space where needed.
+                          Square photos with space below for names and notes.
+                          All card text uses the selected font size.
                         </p>
                         <label className="checkbox print-credit-option">
                           <input

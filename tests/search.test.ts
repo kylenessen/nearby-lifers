@@ -49,19 +49,27 @@ test('every area and every view option round trips through a portable link', () 
       bookletSheetLimit: 23,
       gridColumns: 3,
       gridRows: 5,
+      gridFontSize: 14,
     })
     assert.deepEqual(decodeSettings(encodeSettings(settings)), settings)
   }
 })
-test('print grid dimensions validate independently and old links keep their presets', () => {
-  assert.equal(decodeSettings('?density=compact').view.gridRows, null)
+test('print grid dimensions validate independently and default to three by four', () => {
+  assert.equal(decodeSettings('?density=compact').view.gridRows, 4)
+  assert.equal(decodeSettings('?density=compact').view.gridColumns, 3)
   for (const value of ['', '0', '-1', '1.5', 'no', '9']) {
     const { view } = decodeSettings(`?columns=${value}&rows=4`)
-    assert.equal(view.gridColumns, null)
+    assert.equal(view.gridColumns, 3)
     assert.equal(view.gridRows, 4)
   }
   assert.equal(decodeSettings('?columns=8&rows=1').view.gridColumns, 8)
   assert.equal(decodeSettings('?columns=8&rows=1').view.gridRows, 1)
+})
+test('grid font size defaults to ten points and only accepts usable whole point sizes', () => {
+  for (const value of ['', '0', '5', '25', '10.5', 'NaN'])
+    assert.equal(decodeSettings(`?font_size=${value}`).view.gridFontSize, 10)
+  for (const value of [6, 10, 14, 24])
+    assert.equal(decodeSettings(`?font_size=${value}`).view.gridFontSize, value)
 })
 test('old bookmarks default to forty sheets and malformed limits cannot disable warnings', () => {
   for (const query of [

@@ -107,10 +107,10 @@
 }
 .print-photo {
   position: relative;
-  width: 100%;
-  min-height: 8mm;
+  width: min(100%, var(--print-photo-size));
+  aspect-ratio: 1;
   align-self: center;
-  flex: 1 1 0;
+  flex: 0 0 auto;
   background: white;
 }
 .print-photo img {
@@ -118,7 +118,8 @@
   height: 100%;
   position: absolute;
   inset: 0;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
 }
 .paper-checkbox {
   display: inline-flex;
@@ -143,23 +144,22 @@
 .print-names strong,
 .print-names i {
   display: block;
-  font-size: var(--print-font);
+  font-size: var(--grid-font);
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
 .print-names i {
-  font-size: var(--print-small);
   margin-top: 0.7mm;
 }
 .print-credit {
-  font-size: 5pt;
+  font-size: var(--grid-font);
   line-height: 1.1;
   overflow-wrap: anywhere;
   flex: 0 0 auto;
   color: #444;
 }
 .print-card-group {
-  font-size: 5.5pt;
+  font-size: var(--grid-font);
   line-height: 1.1;
   font-weight: bold;
   border-bottom: 0.2mm solid #92998f;
@@ -171,20 +171,11 @@
   -webkit-print-color-adjust: exact;
 }
 .print-records {
-  position: absolute;
-  top: 1mm;
-  right: 1mm;
-  min-width: 3.3mm;
-  height: 3.3mm;
-  padding: 0 0.7mm;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0.2mm solid #777;
-  color: #222;
-  background: white;
-  font-size: 6pt;
-  line-height: 1;
+  color: #555;
+  font-size: var(--grid-font);
+  line-height: 1.15;
+  flex: 0 0 auto;
+  overflow-wrap: anywhere;
 }
 .density-compact {
   --print-font: 8pt;
@@ -200,10 +191,6 @@
 .paper-a6 .sheet-header span,
 .paper-a6 .sheet-header p {
   font-size: 6pt;
-}
-.paper-a6 .print-card,
-.density-compact .print-card {
-  padding: 1.5mm;
 }
 .paper-a6.density-compact {
   --print-font: 7.5pt;
@@ -317,15 +304,9 @@
   --print-font: 7pt;
   --print-small: 6pt;
 }
-.density-dense .print-grid {
-  gap: 0;
-}
-.density-dense .print-card {
+.print-grid .print-card {
   padding: 1mm;
   gap: 0.4mm;
-}
-.density-dense .print-credit {
-  font-size: 4.5pt;
 }
 .density-dense .print-list-row {
   padding: 0.6mm 0;
@@ -456,6 +437,26 @@
 .booklet-map {
   margin: 0;
   flex: 0 0 auto;
+}
+.booklet-search-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44mm;
+  align-items: start;
+  gap: 3mm;
+  flex: 0 0 auto;
+}
+.booklet-search-access {
+  text-align: center;
+}
+.booklet-search-qr {
+  display: block;
+  width: 44mm;
+  height: 44mm;
+  margin-bottom: 1mm;
+}
+.booklet-qr-unavailable {
+  font-size: 7pt;
+  line-height: 1.3;
 }
 .print-map-canvas {
   width: 100%;
