@@ -1,14 +1,24 @@
 import { boundsOf, GROUPS, insidePolygon, userNames } from './search.ts'
 import type { Search, Point } from './search.ts'
 import { createJsonClient } from './http.ts'
-import { exactTaxonMatch, loadGbif, mapConcurrent, mergeSourceCounts, normalizedName } from './gbif.ts'
+import {
+  exactTaxonMatch,
+  loadGbif,
+  mapConcurrent,
+  mergeSourceCounts,
+  normalizedName,
+} from './gbif.ts'
 import type { ExternalSummary } from './gbif.ts'
 
 const API_ROOT = 'https://api.inaturalist.org/v1'
 const ALL_GRADES = ['research', 'needs_id', 'casual']
 const MAX_POLYGON_OBSERVATIONS = 10000
 // Space API requests, including parallel searches, below 100 requests per minute.
-const fetchJson = createJsonClient({ root: API_ROOT, name: 'iNaturalist', interval: 650 })
+const fetchJson = createJsonClient({
+  root: API_ROOT,
+  name: 'iNaturalist',
+  interval: 650,
+})
 
 type ListResponse<T> = { total_results: number; results: T[] }
 export type INatUser = { id: number; login: string; name?: string }
@@ -250,7 +260,10 @@ export function countPolygonObservations(
   }
   return counts
 }
-export function speciesFromTaxon(taxon: INatTaxon, observedIds: Set<number>): Species {
+export function speciesFromTaxon(
+  taxon: INatTaxon,
+  observedIds: Set<number>,
+): Species {
   return {
     id: taxon.id,
     commonName: taxon.preferred_common_name ?? taxon.name,
@@ -259,9 +272,12 @@ export function speciesFromTaxon(taxon: INatTaxon, observedIds: Set<number>): Sp
     casualOnly: false,
     expectedNearby: false,
     iconicTaxon: taxon.iconic_taxon_name,
-    family: taxon.ancestors?.find(ancestor => ancestor.rank === 'family'),
-    order: taxon.ancestors?.find(ancestor => ancestor.rank === 'order'),
-    photoUrl: taxon.default_photo?.medium_url ?? taxon.default_photo?.square_url ?? taxon.default_photo?.url,
+    family: taxon.ancestors?.find((ancestor) => ancestor.rank === 'family'),
+    order: taxon.ancestors?.find((ancestor) => ancestor.rank === 'order'),
+    photoUrl:
+      taxon.default_photo?.medium_url ??
+      taxon.default_photo?.square_url ??
+      taxon.default_photo?.url,
     photoCredit: taxon.default_photo?.attribution,
     observedByUser: observedIds.has(taxon.id),
   }
@@ -328,9 +344,14 @@ export async function buildSnapshot(
   })()
   const [observed, nearby] = await Promise.all([observedPromise, nearbyPromise])
   const observedIds = new Set(observed.map((t) => t.taxon.id))
-  let species: Species[] = nearby.map(({ taxon, count, nonCasual, expected }) => ({
-    ...speciesFromTaxon(taxon, observedIds), count, casualOnly: nonCasual === 0, expectedNearby: expected,
-  }))
+  let species: Species[] = nearby.map(
+    ({ taxon, count, nonCasual, expected }) => ({
+      ...speciesFromTaxon(taxon, observedIds),
+      count,
+      casualOnly: nonCasual === 0,
+      expectedNearby: expected,
+    }),
+  )
   let external: ExternalSummary | undefined
   if (search.source && search.source !== 'inaturalist') {
     const data = await loadGbif(search, place, signal, progress)
@@ -340,38 +361,93 @@ export async function buildSnapshot(
       known.set(name, [...(known.get(name) ?? []), taxon])
     }
     let completed = 0
-    const matched = await mapConcurrent(data.rows, async ({ taxon, count }) => {
-      let match = exactTaxonMatch(known.get(normalizedName(taxon.canonicalName)) ?? [], taxon)
-      if (!match) {
-        const params = new URLSearchParams({ q: taxon.canonicalName, rank: 'species', is_active: 'true', per_page: '30' })
-        const candidates = await fetchJson<ListResponse<INatTaxon>>('/taxa?' + params, signal, 24 * 60 * 60 * 1000)
-        match = exactTaxonMatch(candidates.results, taxon)
-      }
-      progress?.(`Matching GBIF species to iNaturalist. ${++completed} of ${data.rows.length.toLocaleString()}.`)
-      return { match, taxon, count }
-    }, signal)
+    const matched = await mapConcurrent(
+      data.rows,
+      async ({ taxon, count }) => {
+        let match = exactTaxonMatch(
+          known.get(normalizedName(taxon.canonicalName)) ?? [],
+          taxon,
+        )
+        if (!match) {
+          const params = new URLSearchParams({
+            q: taxon.canonicalName,
+            rank: 'species',
+            is_active: 'true',
+            per_page: '30',
+          })
+          const candidates = await fetchJson<ListResponse<INatTaxon>>(
+            '/taxa?' + params,
+            signal,
+            24 * 60 * 60 * 1000,
+          )
+          match = exactTaxonMatch(candidates.results, taxon)
+        }
+        progress?.(
+          `Matching GBIF species to iNaturalist. ${++completed} of ${data.rows.length.toLocaleString()}.`,
+        )
+        return { match, taxon, count }
+      },
+      signal,
+    )
     // Fetch full iNaturalist taxon details in batches for photos and ancestry.
-    const ids = [...new Set(matched.filter(row => row.match && !row.match.ancestors).map(row => row.match!.id))]
+    const ids = [
+      ...new Set(
+        matched
+          .filter((row) => row.match && !row.match.ancestors)
+          .map((row) => row.match!.id),
+      ),
+    ]
     const details = new Map<number, INatTaxon>()
     for (let index = 0; index < ids.length; index += 30) {
       const batch = ids.slice(index, index + 30)
-      const data = await fetchJson<ListResponse<INatTaxon>>('/taxa/' + batch.join(','), signal, 24 * 60 * 60 * 1000)
+      const data = await fetchJson<ListResponse<INatTaxon>>(
+        '/taxa/' + batch.join(','),
+        signal,
+        24 * 60 * 60 * 1000,
+      )
       for (const taxon of data.results) details.set(taxon.id, taxon)
-      if (batch.some(id => !details.has(id))) throw new Error('iNaturalist returned incomplete taxon details. Please try again.')
+      if (batch.some((id) => !details.has(id)))
+        throw new Error(
+          'iNaturalist returned incomplete taxon details. Please try again.',
+        )
     }
-    species = mergeSourceCounts(species, matched.filter(row => row.match).map(row => ({
-      species: speciesFromTaxon(details.get(row.match!.id) ?? row.match!, observedIds), count: row.count,
-    })), data.label)
+    species = mergeSourceCounts(
+      species,
+      matched
+        .filter((row) => row.match)
+        .map((row) => ({
+          species: speciesFromTaxon(
+            details.get(row.match!.id) ?? row.match!,
+            observedIds,
+          ),
+          count: row.count,
+        })),
+      data.label,
+    )
     external = {
       label: data.label,
       warnings: data.warnings,
       retrievedAt: data.retrievedAt,
-      unmatched: matched.filter(row => !row.match).map(row => ({ key: row.taxon.key, name: row.taxon.canonicalName, count: row.count })),
+      boundaryTolerance: data.boundaryTolerance,
+      unmatched: matched
+        .filter((row) => !row.match)
+        .map((row) => ({
+          key: row.taxon.key,
+          name: row.taxon.canonicalName,
+          count: row.count,
+        })),
     }
   }
   return {
-    users, search, observedTotal: observedIds.size, areaLabel: label,
-    builtAt: new Date().toISOString(), place, external,
-    species: species.sort((a, b) => b.count - a.count || a.commonName.localeCompare(b.commonName)),
+    users,
+    search,
+    observedTotal: observedIds.size,
+    areaLabel: label,
+    builtAt: new Date().toISOString(),
+    place,
+    external,
+    species: species.sort(
+      (a, b) => b.count - a.count || a.commonName.localeCompare(b.commonName),
+    ),
   }
 }

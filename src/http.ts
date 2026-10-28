@@ -33,7 +33,11 @@ export function createJsonClient({
 }) {
   let nextRequestAt = 0
   const cache = new Map<string, { expires: number; value: unknown }>()
-  return async function json<T>(path: string, signal?: AbortSignal, ttl = 0): Promise<T> {
+  return async function json<T>(
+    path: string,
+    signal?: AbortSignal,
+    ttl = 0,
+  ): Promise<T> {
     signal?.throwIfAborted()
     const cached = cache.get(path)
     if (ttl && cached && cached.expires > Date.now()) return cached.value as T
@@ -52,30 +56,44 @@ export function createJsonClient({
       try {
         const response = await fetch(root + path, { signal: controller.signal })
         if (!response.ok) {
-          retryable = response.status === 429 || response.status === 408 || response.status >= 500
+          retryable =
+            response.status === 429 ||
+            response.status === 408 ||
+            response.status >= 500
           const header = response.headers.get('retry-after')
-          if (header) retryAfter = /^\d+$/.test(header) ? Number(header) * 1000 : Math.max(0, Date.parse(header) - Date.now())
+          if (header)
+            retryAfter = /^\d+$/.test(header)
+              ? Number(header) * 1000
+              : Math.max(0, Date.parse(header) - Date.now())
           throw new Error(`${name} returned ${response.status}.`)
         }
-        const value = await response.json() as T
+        const value = (await response.json()) as T
         signal?.throwIfAborted()
         if (ttl) {
-          while (cache.size >= maxEntries) cache.delete(cache.keys().next().value!)
+          while (cache.size >= maxEntries)
+            cache.delete(cache.keys().next().value!)
           cache.set(path, { value, expires: Date.now() + ttl })
         }
         return value
       } catch (error) {
         signal?.throwIfAborted()
         if (!retryable || attempt >= retries)
-          throw new Error(`${name} could not finish the request. Please try again. ${error instanceof Error ? error.message : ''}`)
+          throw new Error(
+            `${name} could not finish the request. Please try again. ${error instanceof Error ? error.message : ''}`,
+          )
       } finally {
         clearTimeout(timer)
         signal?.removeEventListener('abort', abort)
       }
       // Honor long Retry-After periods by failing visibly, never retrying early.
       if (retryAfter > 60000)
-        throw new Error(`${name} is busy. Please try again after ${Math.ceil(retryAfter / 1000)} seconds.`)
-      await abortableDelay(Math.max(retryAfter, retryDelay * 2 ** attempt), signal)
+        throw new Error(
+          `${name} is busy. Please try again after ${Math.ceil(retryAfter / 1000)} seconds.`,
+        )
+      await abortableDelay(
+        Math.max(retryAfter, retryDelay * 2 ** attempt),
+        signal,
+      )
     }
   }
 }
