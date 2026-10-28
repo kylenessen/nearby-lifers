@@ -6,7 +6,7 @@ import { bookletPlan } from './booklet'
 import { BookletBack, BookletParameters } from './BookletDetails'
 import type { View } from './search'
 import type { Snapshot, Species } from './inaturalist'
-import { GROUP_COLORS, printGrid, packGrid, packList } from './print-layout'
+import { printGrid, packGrid, packList } from './print-layout'
 import type { ListColumn } from './print-layout'
 import './PrintPreview.css'
 
@@ -70,17 +70,13 @@ function Row({ species }: { species: Species }) {
 }
 function PrintCard({
   species,
-  label,
   groupKey,
-  color,
   credits,
   visible,
   infoHeight,
 }: {
   species: Species
-  label?: string
   groupKey?: string
-  color?: string
   credits: boolean
   visible: boolean
   infoHeight?: number
@@ -96,12 +92,7 @@ function PrintCard({
           : ({ '--info-height': infoHeight + 'px' } as CSSProperties)
       }
     >
-      <div className={`print-visual ${label ? 'has-group' : ''}`}>
-        {label && (
-          <div className="print-card-group" style={{ backgroundColor: color }}>
-            {label}
-          </div>
-        )}
+      <div className="print-visual">
         <div className="print-photo">
           {species.photoUrl && (
             <img
@@ -160,6 +151,8 @@ export function PrintPreview({
   const contentsColumns = ['compact', 'dense'].includes(view.density) ? 2 : 1
   const measure = useRef<HTMLDivElement>(null)
   const gridMeasure = useRef<HTMLDivElement>(null)
+  const groupHeaderMeasure = useRef<HTMLDivElement>(null)
+  const [groupHeaderHeight, setGroupHeaderHeight] = useState(0)
   const contentsMeasure = useRef<HTMLDivElement>(null)
   const [packed, setPacked] = useState<ListColumn[]>([])
   const [contentsRows, setContentsRows] = useState<number[][]>([])
@@ -170,16 +163,6 @@ export function PrintPreview({
   )
   const groupLabels = useMemo(
     () => new Map(groups.map((group) => [group.key, group.label])),
-    [groups],
-  )
-  const groupColors = useMemo(
-    () =>
-      new Map(
-        groups.map((group, index) => [
-          group.key,
-          GROUP_COLORS[index % GROUP_COLORS.length],
-        ]),
-      ),
     [groups],
   )
   const speciesGroups = useMemo(
@@ -206,11 +189,22 @@ export function PrintPreview({
     [orderedSpecies, columns, rows],
   )
   const grouped = view.grouping !== 'none'
+  const pageGroupLabels = useMemo(
+    () =>
+      gridPages.map((ids) => {
+        const first = groupLabels.get(speciesGroups.get(ids[0])!) ?? ''
+        const last =
+          groupLabels.get(speciesGroups.get(ids[ids.length - 1])!) ?? ''
+        return first === last ? first : first + ' through ' + last
+      }),
+    [gridPages, groupLabels, speciesGroups],
+  )
   const style = {
     '--paper-width': `${paper.width}mm`,
     '--paper-height': `${paper.height}mm`,
     '--print-columns': columns,
     '--print-rows': rows,
+    '--group-header-height': groupHeaderHeight + 'px',
     '--grid-font': `${view.gridFontSize ?? 9}pt`,
     '--list-columns': listColumns,
     '--contents-columns': contentsColumns,
@@ -249,6 +243,22 @@ export function PrintPreview({
   ])
 
   useLayoutEffect(() => {
+    const element = groupHeaderMeasure.current
+    if (!element || !grouped) {
+      setGroupHeaderHeight(0)
+      return
+    }
+    setGroupHeaderHeight(
+      Math.max(
+        0,
+        ...Array.from(element.querySelectorAll('.page-group-header')).map(
+          (header) => header.getBoundingClientRect().height,
+        ),
+      ),
+    )
+  }, [pageGroupLabels, paperKey, booklet, grouped, view.layout])
+
+  useLayoutEffect(() => {
     const element = gridMeasure.current
     if (!element || view.layout !== 'grid') return
     const cards = Array.from(
@@ -257,17 +267,9 @@ export function PrintPreview({
     const body = element.querySelector('.sheet-body')!
     const capacity = body.getBoundingClientRect().height - 1
     const gap = parseFloat(getComputedStyle(body).rowGap)
-    // Reserve the same information height for every card. Group labels only
-    // reserve one line. Additional lines overlay the image without resizing it.
+    // Reserve the same information height for every card so the photo frames
+    // keep matching proportions on full and partial pages.
     const metrics = {
-      group: Math.max(
-        0,
-        ...cards.map(
-          (card) =>
-            card.querySelector('.print-card-group')?.getBoundingClientRect()
-              .height ?? 0,
-        ),
-      ),
       info: Math.max(
         0,
         ...cards.map(
@@ -278,7 +280,7 @@ export function PrintPreview({
       ),
     }
     const height = (capacity - gap * (rows - 1)) / rows
-    const fits = metrics.group + metrics.info + (8 * 96) / 25.4 <= height
+    const fits = metrics.info + (8 * 96) / 25.4 <= height
     setGridInfoHeight(metrics.info)
     onGridFitsChange?.(fits)
   }, [
@@ -287,6 +289,7 @@ export function PrintPreview({
     columns,
     rows,
     gridPages,
+    groupHeaderHeight,
     onGridFitsChange,
     paperKey,
     booklet,
@@ -378,13 +381,14 @@ export function PrintPreview({
       key={s.id}
       species={s}
       groupKey={speciesGroups.get(s.id)}
-      label={grouped ? groupLabels.get(speciesGroups.get(s.id)!) : undefined}
-      color={groupColors.get(speciesGroups.get(s.id)!)}
       credits={view.showPhotoCredits}
       visible={visible}
       infoHeight={measured ? undefined : gridInfoHeight}
     />
   )
+
+  const groupHeader = (label: string) =>
+    grouped && <header className="page-group-header">{label}</header>
 
   const contentPages =
     view.layout === 'grid'
@@ -395,6 +399,7 @@ export function PrintPreview({
             key={index}
           >
             {header}
+            {groupHeader(pageGroupLabels[index])}
             <div className="sheet-body print-grid">
               {page.map((s) => card(s))}
             </div>
@@ -451,10 +456,26 @@ export function PrintPreview({
             : 'Grouped checklist'}
         </p>
       )}
+      {view.layout === 'grid' && grouped && (
+        <div
+          className="print-measure group-header-measure"
+          ref={groupHeaderMeasure}
+          aria-hidden="true"
+        >
+          <div className="print-sheet">
+            {pageGroupLabels.map((label, index) => (
+              <header className="page-group-header" key={index}>
+                {label}
+              </header>
+            ))}
+          </div>
+        </div>
+      )}
       {view.layout === 'grid' && (
         <div className="print-measure" ref={gridMeasure} aria-hidden="true">
           <div className="print-sheet">
             {header}
+            {groupHeader(pageGroupLabels[0] ?? '')}
             <div className="sheet-body print-grid">
               {orderedSpecies.map((s) => card(s, true))}
             </div>
@@ -590,7 +611,7 @@ export function PrintPreview({
                                 Nearby Lifers
                                 {view.bookletTitle.trim() &&
                                 view.bookletTitle.trim() !== 'Nearby Lifers'
-                                  ? ' for'
+                                  ? ' for:'
                                   : ''}
                               </p>
                               {view.bookletTitle.trim() &&

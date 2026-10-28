@@ -129,6 +129,16 @@ export function BookletParameters({
           </div>
         ))}
       </dl>
+      <section className="booklet-print-instructions">
+        <h3>Printing instructions</h3>
+        <p>
+          Use Letter paper in landscape. Print both sides and flip on the short
+          edge. Print at 100% scale with browser headers and footers off. The
+          pages are already arranged for folding, so turn off booklet and
+          multiple-pages-per-sheet settings. Stack in order, fold in half, and
+          staple along the marked spine.
+        </p>
+      </section>
     </>
   )
 }
