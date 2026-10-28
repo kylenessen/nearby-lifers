@@ -4,12 +4,33 @@ import {
   areaQuery,
   buildSnapshot,
   countPolygonObservations,
+  fetchSpeciesCounts,
   polygonObservations,
   queryParams,
 } from '../src/inaturalist.ts'
 import { defaults } from '../src/search.ts'
 
 const taxon = { id: 1, name: 'Species one', iconic_taxon_name: 'Aves' }
+test('life lists include species past the first API page', async (t) => {
+  const pages: string[] = []
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    const page = new URL(url).searchParams.get('page')!
+    pages.push(page)
+    const results =
+      page === '1'
+        ? Array.from({ length: 500 }, (_, i) => ({
+            count: 1,
+            taxon: { ...taxon, id: i + 1 },
+          }))
+        : [{ count: 1, taxon: { ...taxon, id: 501 } }]
+    return new Response(JSON.stringify({ total_results: 501, results }))
+  })
+  const counts = await fetchSpeciesCounts({ user_id: [99] })
+  assert.equal(counts.length, 501)
+  assert.equal(counts[500].taxon.id, 501)
+  assert.deepEqual(pages, ['1', '2'])
+})
+
 test('all grades are explicit and removing casual preserves Research Grade and Needs ID', () => {
   const all = queryParams({})
   assert.equal(all.get('quality_grade'), 'research,needs_id,casual')
