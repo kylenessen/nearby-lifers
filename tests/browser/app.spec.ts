@@ -427,7 +427,7 @@ for (const layout of ['grid', 'list'] as const) {
                   getComputedStyle(item.querySelector('.print-photo img')!)
                     .objectFit !== 'cover'
                 )
-                  errors.push('photo is not fitted to its square')
+                  errors.push('photo does not crop to its frame')
               }
             }
           }
@@ -1011,7 +1011,7 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
             getComputedStyle(card.querySelector('.print-photo img')!)
               .objectFit !== 'cover'
           )
-            errors.push('photo is not fitted to its square')
+            errors.push('photo does not crop to its frame')
           const body = card.closest('.sheet-body')!.getBoundingClientRect()
           if (
             card.getBoundingClientRect().bottom > body.bottom + 1 ||
@@ -1029,8 +1029,7 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
             card.querySelector('.print-photo .print-records')
           )
             errors.push('records are not below the names')
-          if (Math.abs(photo.width - photo.height) > 1)
-            errors.push('photo is not square')
+          if (photo.height < (8 * 96) / 25.4 - 1) errors.push('photo too short')
           const color = getComputedStyle(
             card.querySelector('.print-card-group')!,
           ).backgroundColor
@@ -1088,7 +1087,7 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
     .screenshot({ path: 'test-results/booklet-fitted-photos.png' })
 })
 
-test('booklet photo gallery fills card widths, preserves readable text, and mirrors the spine margin', async ({
+test('booklet photo gallery crops to fill the page, preserves readable text, and mirrors the spine margin', async ({
   page,
 }) => {
   const requests = await mockApi(page)
@@ -1156,9 +1155,12 @@ test('booklet photo gallery fills card widths, preserves readable text, and mirr
         return [r.width, r.height]
       }),
     )
-    expect(
-      photos.every(([width, height]) => Math.abs(width - height) < 1),
-    ).toBe(true)
+    expect(photos.every(([width, height]) => width > 0 && height > 0)).toBe(
+      true,
+    )
+    expect(photos.some(([width, height]) => Math.abs(width - height) > 2)).toBe(
+      true,
+    )
     expect(
       Math.max(...photos.map(([width]) => width)) -
         Math.min(...photos.map(([width]) => width)),
@@ -1180,6 +1182,18 @@ test('booklet photo gallery fills card widths, preserves readable text, and mirr
             .getBoundingClientRect()
           if (Math.abs(photo.width - frame.width) > 1)
             errors.push('photo does not fill the card')
+          const peer = Array.from(card.parentElement!.children).find(
+            (item) =>
+              Math.abs(item.getBoundingClientRect().top - frame.top) < 1,
+          )!
+          const peerPhoto = peer
+            .querySelector('.print-photo')!
+            .getBoundingClientRect()
+          if (
+            Math.abs(photo.top - peerPhoto.top) > 1 ||
+            Math.abs(photo.bottom - peerPhoto.bottom) > 1
+          )
+            errors.push('photos do not align within their row')
           if (
             Math.abs(group.bottom - photo.top) > 1 ||
             Math.abs(group.width - photo.width) > 1
@@ -1241,9 +1255,10 @@ test('booklet photo gallery fills card widths, preserves readable text, and mirr
       expect(p.ids.length).toBeGreaterThan(0)
       expect(p.ids.length).toBeLessThanOrEqual(cols * rowCount)
       expect(p.ids.length % cols).toBe(0)
-      expect(p.bottomGap).toBeGreaterThanOrEqual(-1)
+      expect(Math.abs(p.bottomGap)).toBeLessThan(1)
     }
     for (const p of pages) {
+      expect(Math.abs(p.bottomGap)).toBeLessThan(1)
       expect(p.overflow).toBe(false)
       expect(p.fits).toBe(true)
       expect(p.heights.every((height) => height > 0)).toBe(true)
@@ -1258,9 +1273,9 @@ test('booklet photo gallery fills card widths, preserves readable text, and mirr
   await expect(
     page.getByRole('button', { name: 'Print or save PDF' }),
   ).toBeDisabled()
-  await columns.fill('2')
-  await rows.fill('3')
-  await textSize.fill('10')
+  await columns.fill('4')
+  await rows.fill('4')
+  await textSize.fill('8')
   await expect(page.locator('.grid-warning')).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: 'Print or save PDF' }),
@@ -1268,18 +1283,18 @@ test('booklet photo gallery fills card widths, preserves readable text, and mirr
   expect(
     requests.filter((r) => r.pathname.includes('/observations')).length,
   ).toBe(searchRequests)
-  expect(new URL(page.url()).searchParams.get('columns')).toBe('2')
-  expect(new URL(page.url()).searchParams.get('rows')).toBe('3')
+  expect(new URL(page.url()).searchParams.get('columns')).toBe('4')
+  expect(new URL(page.url()).searchParams.get('rows')).toBe('4')
   const searchUrl = await stack
     .locator('.booklet-search-link')
     .getAttribute('href')
   expect(await decodeSearchQr(page)).toBe(searchUrl)
-  expect(new URL(searchUrl!).searchParams.get('font_size')).toBe('10')
+  expect(new URL(searchUrl!).searchParams.get('font_size')).toBe('8')
   await page.reload()
   await page.getByRole('button', { name: 'Print options', exact: true }).click()
-  await expect(textSize).toHaveValue('10')
-  await expect(columns).toHaveValue('2')
-  await expect(rows).toHaveValue('3')
+  await expect(textSize).toHaveValue('8')
+  await expect(columns).toHaveValue('4')
+  await expect(rows).toHaveValue('4')
   await expect(stack.locator('.print-card')).toHaveCount(42)
   await stack
     .locator('[data-content-index="0"]')
