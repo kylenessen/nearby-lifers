@@ -9,6 +9,7 @@ test('every sheet and density has a usable grid', () => {
       'compact',
       'comfortable',
       'large',
+      'dense',
     ] as View['density'][]) {
       const { columns, rows } = gridShape(paper, density)
       assert.ok(columns > 0 && rows > 0)

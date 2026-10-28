@@ -12,14 +12,15 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { LocationMap } from './LocationMap'
+import { UsernameField } from './UsernameField'
 import { PrintPreview } from './PrintPreview'
+import { groupSpecies, sortSpecies } from './presentation'
 import {
   areaLabel,
   decodeSettings,
   defaults,
   encodeSettings,
   GROUPS,
-  groupFor,
   MONTHS,
   PAPERS,
   searchKey,
@@ -28,7 +29,7 @@ import {
 } from './search'
 import type { Area, Settings, View } from './search'
 import { buildSnapshot, fetchPlaceDetails, searchPlaces } from './inaturalist'
-import type { INatPlace, Snapshot, Species } from './inaturalist'
+import type { INatPlace, Snapshot } from './inaturalist'
 
 function initialSettings() {
   try {
@@ -51,14 +52,6 @@ function writeUrl(settings: Settings, push = false) {
   )
     return
   window.history[push ? 'pushState' : 'replaceState'](null, '', url)
-}
-function sortedSpecies(species: Species[]) {
-  return GROUPS.map((group) => ({
-    group,
-    species: species
-      .filter((s) => groupFor(s.iconicTaxon).key === group.key)
-      .sort((a, b) => a.commonName.localeCompare(b.commonName)),
-  })).filter((g) => g.species.length)
 }
 export default function App() {
   const [initial] = useState(initialSettings)
@@ -301,7 +294,7 @@ export default function App() {
     )
   }
 
-  const visible = useMemo(
+  const filtered = useMemo(
     () =>
       snapshot?.species.filter(
         (s) =>
@@ -311,7 +304,14 @@ export default function App() {
       ) ?? [],
     [snapshot, view.hideCasual, view.hideUnexpected, view.showObserved],
   )
-  const groups = useMemo(() => sortedSpecies(visible), [visible])
+  const visible = useMemo(
+    () => sortSpecies(filtered, view.sort),
+    [filtered, view.sort],
+  )
+  const groups = useMemo(
+    () => groupSpecies(visible, view),
+    [visible, view.sort, view.grouping],
+  )
   const found = snapshot?.species.filter((s) => s.observedByUser).length ?? 0
   const selectedAreaLabel =
     draft.area.kind === 'place' && place?.id === draft.area.id
@@ -407,17 +407,9 @@ export default function App() {
                   if (!drawing) submitSearch()
                 }}
               >
-                <label htmlFor="users">Username</label>
-                <input
-                  id="users"
+                <UsernameField
                   value={draft.users}
-                  onChange={(event) =>
-                    setDraft((s) => ({ ...s, users: event.target.value }))
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                  autoCapitalize="none"
-                  required
+                  onChange={(users) => setDraft((s) => ({ ...s, users }))}
                 />
                 <label className="checkbox">
                   <input
@@ -610,7 +602,11 @@ export default function App() {
               </form>
             )}
           </section>
-          <main className="results-panel" id="results" aria-label="Search results">
+          <main
+            className={`results-panel density-${view.density}`}
+            id="results"
+            aria-label="Search results"
+          >
             <div className="result-actions">
               <button
                 type="button"
@@ -731,12 +727,61 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+                <div className="view-options">
+                  {view.layout === 'list' && (
+                    <label>
+                      Group by
+                      <select
+                        value={view.grouping}
+                        onChange={(e) =>
+                          updateView({
+                            grouping: e.target.value as View['grouping'],
+                          })
+                        }
+                      >
+                        <option value="natural">Taxonomic groups</option>
+                        <option value="family">Families</option>
+                        <option value="order">Orders</option>
+                        <option value="none">None</option>
+                      </select>
+                    </label>
+                  )}
+                  <label>
+                    Sort by
+                    <select
+                      value={view.sort}
+                      onChange={(e) =>
+                        updateView({ sort: e.target.value as View['sort'] })
+                      }
+                    >
+                      <option value="frequency">Most frequently seen</option>
+                      <option value="common">Common name</option>
+                      <option value="scientific">Scientific name</option>
+                    </select>
+                  </label>
+                  <label>
+                    Density
+                    <select
+                      value={view.density}
+                      onChange={(e) =>
+                        updateView({
+                          density: e.target.value as View['density'],
+                        })
+                      }
+                    >
+                      <option value="large">Large</option>
+                      <option value="comfortable">Comfortable</option>
+                      <option value="compact">Compact</option>
+                      <option value="dense">Extra compact</option>
+                    </select>
+                  </label>
+                </div>
                 {preview && (
                   <section
                     className="print-controls"
                     aria-label="Print settings"
                   >
-                    <h3>Make it a field sheet</h3>
+                    <h3>Print settings</h3>
                     <div className="print-options">
                       <label>
                         Paper size
@@ -753,21 +798,6 @@ export default function App() {
                               {paper.label} · {paper.dimensions}
                             </option>
                           ))}
-                        </select>
-                      </label>
-                      <label>
-                        Density
-                        <select
-                          value={view.density}
-                          onChange={(e) =>
-                            updateView({
-                              density: e.target.value as View['density'],
-                            })
-                          }
-                        >
-                          <option value="comfortable">Comfortable</option>
-                          <option value="compact">Compact</option>
-                          <option value="large">Large</option>
                         </select>
                       </label>
                     </div>
@@ -874,12 +904,14 @@ export default function App() {
                     className="taxon-checklist"
                     aria-label="Nearby species"
                   >
-                    {groups.map(({ group, species }) => (
-                      <section key={group.key}>
-                        <h3>
-                          {group.label}
-                          <span>{species.length}</span>
-                        </h3>
+                    {groups.map(({ key, label, scientificName, species }) => (
+                      <section key={key}>
+                        {label && (
+                          <h3 title={scientificName}>
+                            {label}
+                            <span>{species.length}</span>
+                          </h3>
+                        )}
                         <ul>
                           {species.map((s) => (
                             <li key={s.id}>

@@ -40,7 +40,9 @@ test('every area and every view option round trips through a portable link', () 
       showObserved: true,
       layout: 'list',
       paper: 'a6',
-      density: 'compact',
+      density: 'dense',
+      sort: 'scientific',
+      grouping: 'family',
     })
     assert.deepEqual(decodeSettings(encodeSettings(settings)), settings)
   }

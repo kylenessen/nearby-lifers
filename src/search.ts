@@ -68,7 +68,9 @@ export type View = {
   showObserved: boolean
   layout: 'grid' | 'list'
   paper: Paper
-  density: 'comfortable' | 'compact' | 'large'
+  density: 'comfortable' | 'compact' | 'large' | 'dense'
+  sort: 'common' | 'scientific' | 'frequency'
+  grouping: 'natural' | 'family' | 'order' | 'none'
 }
 export type Settings = { search: Search; view: View }
 export const DEFAULT_CENTER = { lat: 35.327632, lng: -120.839097 }
@@ -94,6 +96,8 @@ export function defaults(date = new Date()): Settings {
       layout: 'grid',
       paper: 'letter',
       density: 'comfortable',
+      sort: 'frequency',
+      grouping: 'natural',
     },
   }
 }
@@ -276,6 +280,8 @@ export function encodeSettings({ search, view }: Settings) {
   p.set('layout', view.layout)
   p.set('paper', view.paper)
   p.set('density', view.density)
+  p.set('sort', view.sort)
+  p.set('grouping', view.grouping)
   return p.toString()
 }
 export function decodeSettings(query: string, date = new Date()): Settings {
@@ -331,8 +337,12 @@ export function decodeSettings(query: string, date = new Date()): Settings {
   if (p.get('layout') === 'list') view.layout = 'list'
   const paper = p.get('paper')
   if (paper && Object.hasOwn(PAPERS, paper)) view.paper = paper as Paper
-  if (p.get('density') === 'compact' || p.get('density') === 'large')
+  if (['compact', 'large', 'dense'].includes(p.get('density') ?? ''))
     view.density = p.get('density') as View['density']
+  if (['common', 'scientific', 'frequency'].includes(p.get('sort') ?? ''))
+    view.sort = p.get('sort') as View['sort']
+  if (['natural', 'family', 'order', 'none'].includes(p.get('grouping') ?? ''))
+    view.grouping = p.get('grouping') as View['grouping']
   const error = validateSearch(search)
   if (error) throw new Error(error)
   return settings

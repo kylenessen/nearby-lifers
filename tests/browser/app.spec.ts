@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test'
 import { defaults, encodeSettings, PAPERS } from '../../src/search'
 
 const names = [
-  'American Avocet',
+  'Bufflehead',
   'Black-crowned Night Heron',
   'Long-billed Dowitcher',
   'Red-winged Blackbird',
@@ -11,6 +11,26 @@ const names = [
   'California Scrub-Jay',
   'Anna’s Hummingbird',
   'Great Blue Heron',
+]
+const families = [
+  'Anatidae',
+  'Ardeidae',
+  'Scolopacidae',
+  'Icteridae',
+  'Passerellidae',
+  'Corvidae',
+  'Trochilidae',
+  'Ardeidae',
+]
+const orders = [
+  'Anseriformes',
+  'Pelecaniformes',
+  'Charadriiformes',
+  'Passeriformes',
+  'Passeriformes',
+  'Passeriformes',
+  'Apodiformes',
+  'Pelecaniformes',
 ]
 const species = Array.from({ length: 45 }, (_, i) => ({
   count: 100 - i,
@@ -20,6 +40,26 @@ const species = Array.from({ length: 45 }, (_, i) => ({
     preferred_common_name: names[i % names.length],
     iconic_taxon_name: i < 40 ? 'Aves' : 'Plantae',
     rank_level: 10,
+    ancestors: [
+      {
+        id: 1000 + orders.indexOf(orders[i % 8]),
+        rank: 'order',
+        name: orders[i % 8],
+        preferred_common_name:
+          orders[i % 8] === 'Passeriformes' ? 'Perching Birds' : orders[i % 8],
+      },
+      {
+        id: 2000 + families.indexOf(families[i % 8]),
+        rank: 'family',
+        name: families[i % 8],
+        preferred_common_name:
+          families[i % 8] === 'Anatidae'
+            ? 'Ducks, Geese, and Swans'
+            : families[i % 8] === 'Ardeidae'
+              ? 'Herons, Egrets, and Bitterns'
+              : families[i % 8],
+      },
+    ],
     default_photo: {
       medium_url: 'https://example.test/photo.svg',
       attribution:
@@ -42,7 +82,12 @@ async function mockApi(page: Page) {
     const url = new URL(route.request().url())
     requests.push(url)
     let results: unknown[] = []
-    if (url.pathname.includes('/users/'))
+    if (url.pathname.endsWith('/users/autocomplete'))
+      results = [
+        { id: 99, login: 'kylenessen', name: 'Kyle Nessen' },
+        { id: 100, login: 'kyle-test', name: 'Kyle Test' },
+      ]
+    else if (url.pathname.includes('/users/'))
       results = [{ id: 99, login: url.pathname.split('/').pop() }]
     else if (url.pathname.includes('/places/'))
       results = [
@@ -92,6 +137,40 @@ async function load(page: Page) {
     page.getByText('42 species shown', { exact: true }),
   ).toBeVisible()
 }
+
+test('username search supports keyboard and pointer selection without submitting the form', async ({
+  page,
+}) => {
+  const requests = await mockApi(page)
+  await page.goto('/')
+  await expect(
+    page.getByText('42 species shown', { exact: true }),
+  ).toBeVisible()
+  const username = page.getByRole('combobox', { name: 'Username', exact: true })
+  await username.fill('Kyle')
+  await expect(
+    page.getByRole('option', { name: 'kylenessen Kyle Nessen' }),
+  ).toBeVisible()
+  await username.press('ArrowDown')
+  await username.press('ArrowDown')
+  await username.press('Enter')
+  await expect(username).toHaveValue('kyle-test')
+  expect(new URL(page.url()).searchParams.get('users')).toBe('kylenessen')
+  await username.fill('Kyle Nessen')
+  await expect(
+    page.getByRole('option', { name: 'kylenessen Kyle Nessen' }),
+  ).toBeVisible()
+  await page.getByRole('option', { name: 'kylenessen Kyle Nessen' }).click()
+  await expect(username).toHaveValue('kylenessen')
+  await expect(username).toHaveAttribute('aria-expanded', 'false')
+  expect(
+    requests.some(
+      (url) =>
+        url.pathname.endsWith('/users/autocomplete') &&
+        url.searchParams.get('q') === 'Kyle Nessen',
+    ),
+  ).toBe(true)
+})
 
 test('bookmarks restore all search inputs and presentation without local storage', async ({
   page,
@@ -244,7 +323,7 @@ for (const layout of ['grid', 'list'] as const) {
       })
       .click()
     for (const paper of Object.keys(PAPERS))
-      for (const density of ['comfortable', 'compact', 'large']) {
+      for (const density of ['comfortable', 'compact', 'large', 'dense']) {
         await page
           .getByRole('combobox', { name: 'Paper size', exact: true })
           .selectOption(paper)
@@ -348,4 +427,79 @@ test('mobile bookmarks open directly to results with editable search settings', 
     'kylenessen',
   )
   await expect(page.locator('.map-preview')).toBeVisible()
+})
+
+test('taxonomic grouping, all sort modes, and dense presentation survive a bookmark', async ({
+  page,
+}) => {
+  await load(page)
+  await page
+    .getByRole('button', { name: 'Taxon checklist', exact: true })
+    .click()
+  await expect(
+    page
+      .locator('.taxon-checklist')
+      .getByRole('heading', { name: /Ducks, Geese, and Swans/ }),
+  ).toBeVisible()
+  await expect(
+    page
+      .locator('.taxon-checklist')
+      .getByRole('heading', { name: /Perching Birds/ }),
+  ).toBeVisible()
+  await page
+    .getByRole('combobox', { name: 'Group by', exact: true })
+    .selectOption('none')
+  await page
+    .getByRole('combobox', { name: 'Sort by', exact: true })
+    .selectOption('common')
+  const names = await page.locator('.taxon-checklist li a').allTextContents()
+  expect(names).toEqual(
+    [...names].sort((a, b) =>
+      a.localeCompare(b, 'en', { sensitivity: 'base', numeric: true }),
+    ),
+  )
+  await page
+    .getByRole('combobox', { name: 'Sort by', exact: true })
+    .selectOption('scientific')
+  const scientific = await page
+    .locator('.taxon-checklist li i')
+    .allTextContents()
+  expect(scientific).toEqual([...scientific].sort((a, b) => a.localeCompare(b)))
+  await page
+    .getByRole('combobox', { name: 'Sort by', exact: true })
+    .selectOption('frequency')
+  const counts = (
+    await page.locator('.taxon-checklist .record-count').allTextContents()
+  ).map(Number.parseFloat)
+  expect(counts).toEqual([...counts].sort((a, b) => b - a))
+  await page
+    .getByRole('combobox', { name: 'Density', exact: true })
+    .selectOption('dense')
+  const denseHeight = await page
+    .locator('.taxon-checklist')
+    .evaluate((el) => el.getBoundingClientRect().height)
+  await page
+    .getByRole('combobox', { name: 'Density', exact: true })
+    .selectOption('compact')
+  expect(
+    await page
+      .locator('.taxon-checklist')
+      .evaluate((el) => el.getBoundingClientRect().height),
+  ).toBeGreaterThan(denseHeight)
+  await page
+    .getByRole('combobox', { name: 'Density', exact: true })
+    .selectOption('dense')
+  await page.reload()
+  await expect(
+    page.getByText('42 species shown', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('combobox', { name: 'Density', exact: true }),
+  ).toHaveValue('dense')
+  await expect(
+    page.getByRole('combobox', { name: 'Group by', exact: true }),
+  ).toHaveValue('none')
+  await expect(
+    page.getByRole('combobox', { name: 'Sort by', exact: true }),
+  ).toHaveValue('frequency')
 })

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { groupFor, GROUPS, MONTHS, PAPERS } from './search'
+import { MONTHS, PAPERS } from './search'
+import { groupSpecies } from './presentation'
 import type { View } from './search'
 import type { Snapshot, Species } from './inaturalist'
 import { gridShape, packList } from './print-layout'
@@ -68,22 +69,30 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
   const { columns, rows } = gridShape(view.paper, view.density)
   const listColumns =
     view.paper === 'letter'
-      ? view.density === 'compact'
+      ? ['compact', 'dense'].includes(view.density)
         ? 3
         : 2
-      : view.density === 'compact' && view.paper !== 'a6'
+      : ['compact', 'dense'].includes(view.density) && view.paper !== 'a6'
         ? 2
         : 1
   const measure = useRef<HTMLDivElement>(null)
   const [packed, setPacked] = useState<ListColumn[]>([])
-  const sorted = useMemo(
+  const groups = useMemo(
+    () => groupSpecies(species, view),
+    [species, view.grouping, view.sort],
+  )
+  const groupLabels = useMemo(
+    () => new Map(groups.map((group) => [group.key, group.label])),
+    [groups],
+  )
+  const speciesGroups = useMemo(
     () =>
-      GROUPS.flatMap((group) =>
-        species
-          .filter((s) => groupFor(s.iconicTaxon).key === group.key)
-          .sort((a, b) => a.commonName.localeCompare(b.commonName)),
+      new Map(
+        groups.flatMap((group) =>
+          group.species.map((item) => [item.id, group.key] as const),
+        ),
       ),
-    [species],
+    [groups],
   )
   const byId = useMemo(() => new Map(species.map((s) => [s.id, s])), [species])
   const style = {
@@ -99,19 +108,23 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
     if (!element || view.layout !== 'list') return
     const capacity =
       element.querySelector('.sheet-body')!.getBoundingClientRect().height - 2
-    const heading =
-      element.querySelector('.print-group-heading')?.getBoundingClientRect()
-        .height ?? 25
+    const headings = new Map(
+      Array.from(
+        element.querySelectorAll<HTMLElement>('.print-group-heading'),
+      ).map((heading) => [
+        heading.dataset.groupKey!,
+        heading.getBoundingClientRect().height,
+      ]),
+    )
     const items = Array.from(
       element.querySelectorAll<HTMLElement>('.print-list-row'),
     ).map((row) => ({
       id: Number(row.dataset.speciesId),
-      group: groupFor(byId.get(Number(row.dataset.speciesId))?.iconicTaxon)
-        .label,
+      group: speciesGroups.get(Number(row.dataset.speciesId))!,
       height: row.getBoundingClientRect().height,
     }))
-    setPacked(packList(items, capacity, heading))
-  }, [sorted, byId, view.layout, view.paper, view.density, snapshot])
+    setPacked(packList(items, capacity, headings))
+  }, [groups, speciesGroups, view.layout, view.paper, view.density, snapshot])
 
   const pages: Species[][] = []
   for (let i = 0; i < species.length; i += columns * rows)
@@ -160,9 +173,20 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
             {header}
             <div className="sheet-body">
               <div className="measure-column">
-                <h3 className="print-group-heading">Birds</h3>
-                {sorted.map((s) => (
-                  <Row key={s.id} species={s} />
+                {groups.map((group) => (
+                  <section key={group.key}>
+                    {group.label && (
+                      <h3
+                        className="print-group-heading"
+                        data-group-key={group.key}
+                      >
+                        {group.label}
+                      </h3>
+                    )}
+                    {group.species.map((s) => (
+                      <Row key={s.id} species={s} />
+                    ))}
+                  </section>
                 ))}
               </div>
             </div>
@@ -214,7 +238,11 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
                     <div className="print-list-column" key={columnIndex}>
                       {column.map((group, i) => (
                         <section key={i}>
-                          <h3 className="print-group-heading">{group.group}</h3>
+                          {groupLabels.get(group.group) && (
+                            <h3 className="print-group-heading">
+                              {groupLabels.get(group.group)}
+                            </h3>
+                          )}
                           {group.ids.map((id) => (
                             <Row key={id} species={byId.get(id)!} />
                           ))}

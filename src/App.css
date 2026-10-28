@@ -613,3 +613,147 @@ fieldset legend {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+.username-field {
+  position: relative;
+  margin-bottom: 14px;
+}
+.username-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: white;
+  border: 1px solid #bac7ba;
+  border-radius: 7px;
+}
+.username-input input {
+  border: 0;
+  padding-inline: 0;
+  background: transparent;
+}
+.username-input svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.username-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: white;
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 18px #25393018;
+  border-radius: 7px;
+  max-height: 280px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 4px;
+  margin: 3px 0;
+}
+.username-results li {
+  padding: 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.username-results li[aria-selected='true'] {
+  background: #e8efe3;
+}
+.username-results strong,
+.username-results span {
+  display: block;
+}
+.username-results span {
+  color: var(--muted);
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.view-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.view-options select {
+  margin-top: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+.results-panel.density-large .species-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr));
+}
+.results-panel.density-compact .species-grid {
+  grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+  gap: 15px 10px;
+}
+.results-panel.density-dense .species-grid {
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 10px 7px;
+}
+.results-panel.density-dense .species-copy {
+  padding-top: 5px;
+}
+.results-panel.density-dense .species-copy h3 {
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.results-panel.density-dense .species-copy p {
+  font-size: 9px;
+  margin-bottom: 3px;
+}
+.results-panel.density-dense .count-pill {
+  font-size: 8px;
+  bottom: 3px;
+  right: 3px;
+  padding: 3px;
+}
+.results-panel.density-dense .species-tags span {
+  font-size: 8px;
+  padding: 1px 2px;
+}
+.results-panel.density-dense .photo-credit {
+  font-size: 8px;
+  margin-top: 4px;
+}
+.results-panel.density-compact .species-copy h3 {
+  font-size: 12px;
+}
+.results-panel.density-large .taxon-checklist li {
+  padding: 12px 0;
+  font-size: 15px;
+}
+.results-panel.density-compact .taxon-checklist li {
+  padding: 6px 0;
+}
+.results-panel.density-dense .taxon-checklist section {
+  margin-bottom: 14px;
+}
+.results-panel.density-dense .taxon-checklist h3 {
+  font-size: 13px;
+  padding-bottom: 6px;
+}
+.results-panel.density-dense .taxon-checklist li {
+  padding: 4px 0;
+  gap: 7px;
+  font-size: 11px;
+}
+.results-panel.density-dense .taxon-checklist li > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1px 8px;
+}
+.results-panel.density-dense .taxon-checklist li i {
+  display: inline;
+  font-size: 10px;
+  margin: 0;
+}
+.results-panel.density-dense .record-count {
+  font-size: 10px;
+}
+.results-panel.density-dense .check-box {
+  width: 12px;
+  height: 12px;
+}

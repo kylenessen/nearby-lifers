@@ -17,12 +17,19 @@ export type INatTaxon = {
   rank_level?: number
   min_species_taxon_id?: number
   ancestor_ids?: number[]
+  ancestors?: TaxonAncestor[]
   default_photo?: {
     attribution?: string
     medium_url?: string
     square_url?: string
     url?: string
   } | null
+}
+export type TaxonAncestor = {
+  id: number
+  name: string
+  rank: string
+  preferred_common_name?: string
 }
 export type INatPlace = {
   id: number
@@ -46,6 +53,7 @@ export type SpeciesCountQuery = {
   user_id?: number[]
   quality_grade?: string[]
   expected_nearby?: boolean
+  include_ancestors?: boolean
 }
 export type Species = {
   id: number
@@ -55,6 +63,8 @@ export type Species = {
   casualOnly: boolean
   expectedNearby: boolean
   iconicTaxon?: string
+  family?: TaxonAncestor
+  order?: TaxonAncestor
   photoUrl?: string
   photoCredit?: string
   observedByUser: boolean
@@ -108,6 +118,14 @@ export async function resolveUser(login: string, signal?: AbortSignal) {
   if (!data.results[0])
     throw new Error(`No iNaturalist user found for ${login}.`)
   return data.results[0]
+}
+export async function searchUsers(query: string, signal?: AbortSignal) {
+  if (query.trim().length < 2) return []
+  const data = await fetchJson<ListResponse<INatUser>>(
+    `/users/autocomplete?${new URLSearchParams({ q: query.trim(), per_page: '8' })}`,
+    signal,
+  )
+  return data.results
 }
 export async function searchPlaces(query: string, signal?: AbortSignal) {
   if (query.trim().length < 2) return []
@@ -271,7 +289,7 @@ export async function buildSnapshot(
   const nearbyPromise = (async () => {
     if (search.area.kind === 'polygon') {
       const [taxa, observations, expected] = await Promise.all([
-        fetchSpeciesCounts(query, signal),
+        fetchSpeciesCounts({ ...query, include_ancestors: true }, signal),
         polygonObservations(query, search.area.points, signal, progress),
         polygonObservations(
           { ...query, expected_nearby: true },
@@ -291,7 +309,7 @@ export async function buildSnapshot(
         }))
     }
     const [nearby, nonCasual, expected] = await Promise.all([
-      fetchSpeciesCounts(query, signal),
+      fetchSpeciesCounts({ ...query, include_ancestors: true }, signal),
       fetchSpeciesCounts(
         { ...query, quality_grade: ['research', 'needs_id'] },
         signal,
@@ -323,6 +341,8 @@ export async function buildSnapshot(
         casualOnly: nonCasual === 0,
         expectedNearby: expected,
         iconicTaxon: taxon.iconic_taxon_name,
+        family: taxon.ancestors?.find((ancestor) => ancestor.rank === 'family'),
+        order: taxon.ancestors?.find((ancestor) => ancestor.rank === 'order'),
         photoUrl:
           taxon.default_photo?.medium_url ??
           taxon.default_photo?.square_url ??

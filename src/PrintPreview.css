@@ -273,3 +273,37 @@
     -webkit-print-color-adjust: exact;
   }
 }
+
+.density-dense {
+  --print-font: 7pt;
+  --print-small: 6pt;
+}
+.density-dense .print-grid {
+  gap: 1.5mm;
+}
+.density-dense .print-card {
+  padding: 1mm;
+  gap: 0.7mm;
+}
+.density-dense .print-credit {
+  font-size: 4.5pt;
+}
+.density-dense .print-list-row {
+  padding: 0.6mm 0;
+  gap: 1.3mm;
+}
+.density-dense .print-list-row > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4mm 1.5mm;
+}
+.density-dense .print-list-row strong,
+.density-dense .print-list-row i {
+  display: inline;
+  margin: 0;
+}
+.density-dense .print-list-row .paper-checkbox {
+  width: 2.5mm;
+  height: 2.5mm;
+}
