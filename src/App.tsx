@@ -62,6 +62,12 @@ function sortedSpecies(species: Species[]) {
 }
 export default function App() {
   const [initial] = useState(initialSettings)
+  const [builderOpen, setBuilderOpen] = useState(
+    () =>
+      Boolean(initial.error) ||
+      !window.location.search ||
+      !window.matchMedia('(max-width: 760px)').matches,
+  )
   const [settings, setSettings] = useState(initial.settings)
   const [draft, setDraft] = useState(initial.settings.search)
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
@@ -239,6 +245,12 @@ export default function App() {
     setCanLoad(true)
     setError(null)
     setCopyMessage('')
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      setBuilderOpen(false)
+      requestAnimationFrame(() =>
+        document.getElementById('results')?.scrollIntoView({ block: 'start' }),
+      )
+    }
     if (searchKey(search) === loadKey) setRetry((v) => v + 1)
   }
   function toggle(field: 'groups' | 'months', value: string | number) {
@@ -377,225 +389,244 @@ export default function App() {
         <div className="workspace">
           <section className="search-panel" aria-labelledby="search-title">
             <div className="section-heading">
-              <h2 id="search-title">Build your search</h2>
-              <span className="step-label">01</span>
+              <h2 id="search-title">
+                {builderOpen ? 'Build your search' : 'Your saved search'}
+              </h2>
+              <button
+                type="button"
+                className="text-button"
+                aria-expanded={builderOpen}
+                aria-controls="search-form"
+                disabled={drawing}
+                onClick={() => setBuilderOpen((open) => !open)}
+              >
+                {builderOpen ? 'Hide controls' : 'Edit search'}
+              </button>
             </div>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (!drawing) submitSearch()
-              }}
-            >
-              <label htmlFor="users">iNaturalist usernames</label>
-              <input
-                id="users"
-                value={draft.users}
-                onChange={(event) =>
-                  setDraft((s) => ({ ...s, users: event.target.value }))
-                }
-                autoComplete="off"
-                spellCheck={false}
-                autoCapitalize="none"
-                required
-              />
-              <p className="hint">
-                Separate users with commas. Species observed by any listed user
-                count as already seen.
+            {!builderOpen && (
+              <p className="collapsed-summary">
+                {draft.users} · {selectedAreaLabel}
               </p>
-              <label className="checkbox">
+            )}
+            {builderOpen && (
+              <form
+                id="search-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (!drawing) submitSearch()
+                }}
+              >
+                <label htmlFor="users">iNaturalist usernames</label>
                 <input
-                  type="checkbox"
-                  checked={draft.excludeUserCasual}
-                  onChange={(e) =>
-                    setDraft((s) => ({
-                      ...s,
-                      excludeUserCasual: e.target.checked,
-                    }))
+                  id="users"
+                  value={draft.users}
+                  onChange={(event) =>
+                    setDraft((s) => ({ ...s, users: event.target.value }))
                   }
+                  autoComplete="off"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  required
                 />
-                Exclude users’ casual observations
-              </label>
-              <p className="hint">
-                Research Grade and Needs ID always count. Casual observations
-                count unless excluded. Life lists use all dates and locations.
-              </p>
-              <div className="field-section">
-                <div className="label-row">
-                  <label htmlFor="place-search">Search area</label>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={useLocation}
-                    disabled={locating}
-                  >
-                    {locating ? (
-                      <LoaderCircle size={14} className="spin" />
-                    ) : (
-                      <LocateFixed size={14} />
-                    )}
-                    Use my location
-                  </button>
-                </div>
-                <div className="place-search">
-                  <SearchIcon size={17} />
+                <p className="hint">
+                  Separate users with commas. Species observed by any listed
+                  user count as already seen.
+                </p>
+                <label className="checkbox">
                   <input
-                    id="place-search"
-                    placeholder="Find an iNaturalist place or enter its ID"
-                    value={placeQuery}
-                    onChange={(e) => setPlaceQuery(e.target.value)}
-                    autoComplete="off"
-                    aria-controls="place-results"
-                    aria-expanded={places.length > 0}
-                  />
-                  {placeBusy && <LoaderCircle size={15} className="spin" />}
-                </div>
-                {places.length > 0 && (
-                  <ul className="place-results" id="place-results">
-                    {places.map((p) => (
-                      <li key={p.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onAreaChange({ kind: 'place', id: p.id })
-                            setPlace(p)
-                            setPlaces([])
-                            setMapVersion((v) => v + 1)
-                            setDrawing(false)
-                          }}
-                        >
-                          {p.display_name ?? p.name}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {placeError && (
-                  <p className="error-text" role="status">
-                    {placeError}
-                  </p>
-                )}
-                <LocationMap
-                  key={mapVersion}
-                  area={draft.area}
-                  radius={draft.radius}
-                  place={place}
-                  onChange={onAreaChange}
-                  onDrawingChange={setDrawing}
-                />
-                <p className="area-label">{selectedAreaLabel}</p>
-                {draft.area.kind === 'circle' && (
-                  <label className="radius-field">
-                    Radius in km
-                    <input
-                      type="number"
-                      min="0.1"
-                      max="100"
-                      step="0.1"
-                      value={draft.radius}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          radius: Number(e.target.value),
-                        }))
-                      }
-                    />
-                  </label>
-                )}
-                {draft.area.kind === 'polygon' && (
-                  <p className="hint">
-                    Uses public observation coordinates inside your shape.
-                    Obscured locations may be imprecise. Large areas may need
-                    fewer months or life groups.
-                  </p>
-                )}
-              </div>
-              <fieldset>
-                <legend>Months observed</legend>
-                <div className="label-row">
-                  <span className="hint">Across all years</span>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() =>
+                    type="checkbox"
+                    checked={draft.excludeUserCasual}
+                    onChange={(e) =>
                       setDraft((s) => ({
                         ...s,
-                        months: Array.from({ length: 12 }, (_, i) => i + 1),
+                        excludeUserCasual: e.target.checked,
                       }))
                     }
-                  >
-                    All year
-                  </button>
-                </div>
-                <div className="chips months">
-                  {MONTHS.map((m, i) => (
+                  />
+                  Exclude users’ casual observations
+                </label>
+                <p className="hint">
+                  Research Grade and Needs ID always count. Casual observations
+                  count unless excluded. Life lists use all dates and locations.
+                </p>
+                <div className="field-section">
+                  <div className="label-row">
+                    <label htmlFor="place-search">Search area</label>
                     <button
                       type="button"
-                      key={m}
-                      aria-pressed={draft.months.includes(i + 1)}
-                      onClick={() => toggle('months', i + 1)}
+                      className="text-button"
+                      onClick={useLocation}
+                      disabled={locating}
                     >
-                      {m}
+                      {locating ? (
+                        <LoaderCircle size={14} className="spin" />
+                      ) : (
+                        <LocateFixed size={14} />
+                      )}
+                      Use my location
                     </button>
-                  ))}
+                  </div>
+                  <div className="place-search">
+                    <SearchIcon size={17} />
+                    <input
+                      id="place-search"
+                      placeholder="Find an iNaturalist place or enter its ID"
+                      value={placeQuery}
+                      onChange={(e) => setPlaceQuery(e.target.value)}
+                      autoComplete="off"
+                      aria-controls="place-results"
+                      aria-expanded={places.length > 0}
+                    />
+                    {placeBusy && <LoaderCircle size={15} className="spin" />}
+                  </div>
+                  {places.length > 0 && (
+                    <ul className="place-results" id="place-results">
+                      {places.map((p) => (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onAreaChange({ kind: 'place', id: p.id })
+                              setPlace(p)
+                              setPlaces([])
+                              setMapVersion((v) => v + 1)
+                              setDrawing(false)
+                            }}
+                          >
+                            {p.display_name ?? p.name}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {placeError && (
+                    <p className="error-text" role="status">
+                      {placeError}
+                    </p>
+                  )}
+                  <LocationMap
+                    key={mapVersion}
+                    area={draft.area}
+                    radius={Math.min(100, Math.max(0.1, draft.radius))}
+                    place={place}
+                    onChange={onAreaChange}
+                    onDrawingChange={setDrawing}
+                  />
+                  <p className="area-label">{selectedAreaLabel}</p>
+                  {draft.area.kind === 'circle' && (
+                    <label className="radius-field">
+                      Radius in km
+                      <input
+                        type="number"
+                        min="0.1"
+                        max="100"
+                        step="0.1"
+                        value={draft.radius}
+                        onChange={(e) =>
+                          setDraft((s) => ({
+                            ...s,
+                            radius: Number(e.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                  )}
+                  {draft.area.kind === 'polygon' && (
+                    <p className="hint">
+                      Uses public observation coordinates inside your shape.
+                      Obscured locations may be imprecise. Large areas may need
+                      fewer months or life groups.
+                    </p>
+                  )}
                 </div>
-              </fieldset>
-              <fieldset>
-                <legend>Life groups</legend>
-                <div className="label-row">
-                  <span className="hint">Choose what you want to find</span>
-                  <div>
+                <fieldset>
+                  <legend>Months observed</legend>
+                  <div className="label-row">
+                    <span className="hint">Across all years</span>
                     <button
                       type="button"
                       className="text-button"
                       onClick={() =>
                         setDraft((s) => ({
                           ...s,
-                          groups: GROUPS.map((g) => g.key),
+                          months: Array.from({ length: 12 }, (_, i) => i + 1),
                         }))
                       }
                     >
-                      All
-                    </button>
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() => setDraft((s) => ({ ...s, groups: [] }))}
-                    >
-                      None
+                      All year
                     </button>
                   </div>
-                </div>
-                <div className="chips">
-                  {GROUPS.map((g) => (
-                    <button
-                      type="button"
-                      key={g.key}
-                      aria-pressed={draft.groups.includes(g.key)}
-                      onClick={() => toggle('groups', g.key)}
-                    >
-                      {g.label}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <button
-                className="primary search-button"
-                type="submit"
-                disabled={drawing}
-              >
-                {loading ? (
-                  <LoaderCircle size={18} className="spin" />
-                ) : (
-                  <SearchIcon size={18} />
-                )}
-                {loading ? 'Restart search' : 'Find nearby lifers'}
-              </button>
-              <p className="hint bookmark-hint">
-                Run your search to update the URL. Bookmark it or add it to your
-                home screen to return to the same settings. Results refresh when
-                you open it.
-              </p>
-            </form>
+                  <div className="chips months">
+                    {MONTHS.map((m, i) => (
+                      <button
+                        type="button"
+                        key={m}
+                        aria-pressed={draft.months.includes(i + 1)}
+                        onClick={() => toggle('months', i + 1)}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>Life groups</legend>
+                  <div className="label-row">
+                    <span className="hint">Choose what you want to find</span>
+                    <div>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          setDraft((s) => ({
+                            ...s,
+                            groups: GROUPS.map((g) => g.key),
+                          }))
+                        }
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setDraft((s) => ({ ...s, groups: [] }))}
+                      >
+                        None
+                      </button>
+                    </div>
+                  </div>
+                  <div className="chips">
+                    {GROUPS.map((g) => (
+                      <button
+                        type="button"
+                        key={g.key}
+                        aria-pressed={draft.groups.includes(g.key)}
+                        onClick={() => toggle('groups', g.key)}
+                      >
+                        {g.label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <button
+                  className="primary search-button"
+                  type="submit"
+                  disabled={drawing}
+                >
+                  {loading ? (
+                    <LoaderCircle size={18} className="spin" />
+                  ) : (
+                    <SearchIcon size={18} />
+                  )}
+                  {loading ? 'Restart search' : 'Find nearby lifers'}
+                </button>
+                <p className="hint bookmark-hint">
+                  Run your search to update the URL. Bookmark it or add it to
+                  your home screen to return to the same settings. Results
+                  refresh when you open it.
+                </p>
+              </form>
+            )}
           </section>
           <main className="results-panel" id="results">
             <div className="section-heading">

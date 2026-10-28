@@ -656,3 +656,10 @@ fieldset legend {
     min-height: 44px;
   }
 }
+
+.collapsed-summary {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
