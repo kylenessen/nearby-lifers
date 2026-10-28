@@ -1,1005 +1,1277 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, FormEvent, KeyboardEvent } from 'react'
 import {
   ArrowUp,
   Check,
-  Circle,
+  ExternalLink,
+  Leaf,
+  Link as LinkIcon,
   LocateFixed,
   LoaderCircle,
-  MapPin,
-  RefreshCw,
-  Search,
+  Printer,
+  Search as SearchIcon,
 } from 'lucide-react'
 import './App.css'
-import { LocationMap, type LatLngPoint, type SearchArea } from './LocationMap'
+import { LocationMap } from './LocationMap'
+import { UsernameField } from './UsernameField'
+import { PrintPreview } from './PrintPreview'
+import { printGrid } from './print-layout'
+import { groupSpecies } from './presentation'
+import { recordDetails, recordLabel } from './gbif'
 import {
-  type INatGeoJson,
-  type INatPlace,
-  type INatUser,
-  type SpeciesCountBounds,
-  fetchPlaceDetails,
-  fetchSpeciesCounts,
-  getPhotoUrl,
-  resolveUser,
-  searchPlaces,
-} from './inaturalist'
+  areaLabel,
+  decodeSettings,
+  defaults,
+  encodeSettings,
+  GROUPS,
+  MONTHS,
+  PAPERS,
+  SOURCES,
+  searchKey,
+  userNames,
+  validateSearch,
+} from './search'
+import type { Area, Settings, View } from './search'
+import { buildSnapshot, fetchPlaceDetails, searchPlaces } from './inaturalist'
+import type { INatPlace, Snapshot } from './inaturalist'
 
-const DEFAULT_USERNAME = 'kylenessen'
-const DEFAULT_CENTER = {
-  lat: 35.32763176091517,
-  lng: -120.83909699047472,
-}
-const DEFAULT_RADIUS = 1
-const DEFAULT_COLUMNS = 3
-
-const MONTH_NAMES = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
-
-const TAXON_GROUPS = [
-  { key: 'plants', label: 'Plants', taxa: ['Plantae'] },
-  { key: 'birds', label: 'Birds', taxa: ['Aves'] },
-  { key: 'mammals', label: 'Mammals', taxa: ['Mammalia'] },
-  { key: 'reptiles', label: 'Reptiles', taxa: ['Reptilia'] },
-  { key: 'amphibians', label: 'Amphibians', taxa: ['Amphibia'] },
-  { key: 'insects', label: 'Insects', taxa: ['Insecta'] },
-  { key: 'spiders', label: 'Spiders', taxa: ['Arachnida'] },
-  { key: 'fish', label: 'Fish', taxa: ['Actinopterygii'] },
-  { key: 'fungi', label: 'Fungi', taxa: ['Fungi'] },
-  { key: 'mollusks', label: 'Mollusks', taxa: ['Mollusca'] },
-  {
-    key: 'other',
-    label: 'Other',
-    taxa: ['Animalia', 'Chromista', 'Protozoa', 'unknown'],
-  },
-]
-
-const ICONIC_TAXON_TO_GROUP = new Map(
-  TAXON_GROUPS.flatMap((group) =>
-    group.taxa.map((taxon) => [taxon, group.key] as const),
-  ),
-)
-
-type SpeciesCard = {
-  id: number
-  commonName: string
-  scientificName: string
-  count: number
-  nonCasualCount: number
-  casualOnly: boolean
-  expectedNearby: boolean
-  iconicTaxon?: string
-  photoUrl?: string
-  observedByUser: boolean
-}
-
-type Snapshot = {
-  builtAt: string
-  user: INatUser
-  areaLabel: string
-  months: number[]
-  observedTotal: number
-  species: SpeciesCard[]
-}
-
-function getSeasonMonths(date = new Date()) {
-  const currentMonth = date.getMonth() + 1
-  const previousMonth = currentMonth === 1 ? 12 : currentMonth - 1
-  const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1
-
-  return [previousMonth, currentMonth, nextMonth]
-}
-
-function formatMonths(months: number[]) {
-  return months.map((month) => MONTH_NAMES[month - 1]).join(', ')
-}
-
-function getFallbackLabel(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase()
-}
-
-function getSpeciesGroup(iconicTaxon?: string) {
-  return ICONIC_TAXON_TO_GROUP.get(iconicTaxon ?? 'unknown') ?? 'other'
-}
-
-function findGeoJsonBounds(geoJson?: INatGeoJson | null) {
-  if (!geoJson) {
-    return null
-  }
-
-  const points: LatLngPoint[] = []
-
-  function collectCoordinates(value: unknown) {
-    if (!Array.isArray(value)) {
-      return
-    }
-
-    if (
-      value.length >= 2 &&
-      typeof value[0] === 'number' &&
-      typeof value[1] === 'number'
-    ) {
-      points.push({ lat: value[1], lng: value[0] })
-      return
-    }
-
-    value.forEach(collectCoordinates)
-  }
-
-  collectCoordinates('coordinates' in geoJson ? geoJson.coordinates : null)
-
-  if (points.length === 0) {
-    return null
-  }
-
-  return {
-    sw: {
-      lat: Math.min(...points.map((point) => point.lat)),
-      lng: Math.min(...points.map((point) => point.lng)),
-    },
-    ne: {
-      lat: Math.max(...points.map((point) => point.lat)),
-      lng: Math.max(...points.map((point) => point.lng)),
-    },
-  }
-}
-
-function boundsToSpeciesCountBounds(bounds: {
-  sw: LatLngPoint
-  ne: LatLngPoint
-}): SpeciesCountBounds {
-  return {
-    nelat: bounds.ne.lat,
-    nelng: bounds.ne.lng,
-    swlat: bounds.sw.lat,
-    swlng: bounds.sw.lng,
-  }
-}
-
-function getAreaLabel(area: SearchArea, radiusKm: number) {
-  if (area.kind === 'circle') {
-    return `${radiusKm} km radius`
-  }
-
-  if (area.kind === 'rectangle') {
-    return 'Drawn rectangle'
-  }
-
-  return area.place.display_name ?? area.place.name
-}
-
-function getAreaQuery(area: SearchArea, radiusKm: number) {
-  if (area.kind === 'circle') {
+function initialSettings() {
+  try {
+    return { settings: decodeSettings(window.location.search), error: null }
+  } catch (error) {
     return {
-      lat: area.center.lat,
-      lng: area.center.lng,
-      radius: radiusKm,
+      settings: defaults(),
+      error:
+        error instanceof Error
+          ? error.message
+          : 'This search link could not be read.',
     }
   }
-
-  if (area.kind === 'rectangle') {
-    return {
-      bounds: boundsToSpeciesCountBounds(area.bounds),
-    }
-  }
-
-  return {
-    placeIds: [area.place.id],
-  }
 }
-
-function getPlaceName(place: INatPlace) {
-  return place.display_name ?? place.name
+function writeUrl(settings: Settings, push = false) {
+  const url = `${window.location.pathname}?${encodeSettings(settings)}${window.location.hash}`
+  if (
+    url ===
+    `${window.location.pathname}${window.location.search}${window.location.hash}`
+  )
+    return
+  window.history[push ? 'pushState' : 'replaceState'](null, '', url)
 }
-
-function App() {
-  const defaultMonths = useMemo(() => getSeasonMonths(), [])
-  const [username, setUsername] = useState(DEFAULT_USERNAME)
-  const [radius, setRadius] = useState(String(DEFAULT_RADIUS))
-  const [searchMode, setSearchMode] = useState<'circle' | 'rectangle'>('circle')
-  const [searchArea, setSearchArea] = useState<SearchArea>({
-    kind: 'circle',
-    center: DEFAULT_CENTER,
-  })
-  const [placeQuery, setPlaceQuery] = useState('')
-  const [placeResults, setPlaceResults] = useState<INatPlace[]>([])
-  const [placeDropdownOpen, setPlaceDropdownOpen] = useState(false)
-  const [placeActiveIndex, setPlaceActiveIndex] = useState(-1)
-  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false)
-  const [isLocating, setIsLocating] = useState(false)
-  const [selectedMonths, setSelectedMonths] = useState(
-    () => new Set(defaultMonths),
+function NumberField({
+  label,
+  min = 1,
+  max,
+  className,
+  value,
+  onChange,
+}: {
+  label: string
+  min?: number
+  max: number
+  className?: string
+  value: number
+  onChange: (value: number) => void
+}) {
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+  return (
+    <label className={className}>
+      {label}
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step="1"
+        value={draft}
+        onChange={(event) => {
+          const text = event.target.value
+          setDraft(text)
+          const number = Number(text)
+          if (
+            text &&
+            Number.isInteger(number) &&
+            number >= min &&
+            number <= max
+          )
+            onChange(number)
+        }}
+        onBlur={() => setDraft(String(value))}
+      />
+    </label>
   )
-  const [selectedGroups, setSelectedGroups] = useState(
-    () => new Set(TAXON_GROUPS.map((group) => group.key)),
+}
+export default function App() {
+  const [initial] = useState(initialSettings)
+  const [builderOpen, setBuilderOpen] = useState(
+    () =>
+      Boolean(initial.error) ||
+      !window.location.search ||
+      !window.matchMedia('(max-width: 760px)').matches,
   )
-  const [columns, setColumns] = useState(DEFAULT_COLUMNS)
-  const [showHiddenSpecies, setShowHiddenSpecies] = useState(false)
-  const [hideCasualOnly, setHideCasualOnly] = useState(false)
-  const [hideUnexpected, setHideUnexpected] = useState(false)
-  const [showBackToTop, setShowBackToTop] = useState(false)
+  const [settings, setSettings] = useState(initial.settings)
+  const [draft, setDraft] = useState(initial.settings.search)
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
-  const [localDone, setLocalDone] = useState(() => new Set<number>())
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const didAutoBuild = useRef(false)
-  const placeSearchRequestId = useRef(0)
+  const [error, setError] = useState<string | null>(initial.error)
+  const [canLoad, setCanLoad] = useState(!initial.error)
+  const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState('Loading your search.')
+  const [retry, setRetry] = useState(0)
+  const [place, setPlace] = useState<INatPlace | null>(null)
+  const [placeQuery, setPlaceQuery] = useState('')
+  const [places, setPlaces] = useState<INatPlace[]>([])
+  const [placeBusy, setPlaceBusy] = useState(false)
+  const [placeError, setPlaceError] = useState<string | null>(null)
+  const [locating, setLocating] = useState(false)
+  const [drawing, setDrawing] = useState(false)
+  const [mapVersion, setMapVersion] = useState(0)
+  const [preview, setPreview] = useState(false)
+  const [copyMessage, setCopyMessage] = useState('')
+  const [printing, setPrinting] = useState(false)
+  const [bookletSheets, setBookletSheets] = useState(0)
+  const [gridFits, setGridFits] = useState(true)
+  const [printMessage, setPrintMessage] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+  const initialUrlWritten = useRef(false)
+  const loadKey = searchKey(settings.search)
+  const pending = searchKey(draft) !== loadKey || drawing
+  const { view } = settings
 
-  const radiusKm = Number(radius)
-  const selectedMonthsArray = useMemo(
-    () => Array.from(selectedMonths).sort((a, b) => a - b),
-    [selectedMonths],
-  )
+  useEffect(() => {
+    if (initialUrlWritten.current || !canLoad) return
+    writeUrl(settings)
+    initialUrlWritten.current = true
+  }, [settings, canLoad])
 
-  const handleCircleCenterSelected = useCallback((point: LatLngPoint) => {
-    setSearchArea({ kind: 'circle', center: point })
+  useEffect(() => {
+    function restore() {
+      requestRef.current?.abort()
+      try {
+        const restored = decodeSettings(window.location.search)
+        setSettings(restored)
+        setDraft(restored.search)
+        setCanLoad(true)
+        setError(null)
+        setPlaceQuery('')
+        setDrawing(false)
+        setMapVersion((v) => v + 1)
+        setCopyMessage('')
+      } catch (cause) {
+        setCanLoad(false)
+        setSnapshot(null)
+        setLoading(false)
+        setError(
+          cause instanceof Error ? cause.message : 'Invalid search link.',
+        )
+      }
+    }
+    window.addEventListener('popstate', restore)
+    return () => window.removeEventListener('popstate', restore)
   }, [])
 
-  const handleRectangleSelected = useCallback(
-    (bounds: { sw: LatLngPoint; ne: LatLngPoint }) => {
-      setSearchArea({ kind: 'rectangle', bounds })
-    },
-    [],
-  )
-
-  const buildSnapshot = useCallback(async () => {
-    if (!Number.isFinite(radiusKm) || radiusKm <= 0) {
-      setError('Radius needs to be greater than zero')
-      return
-    }
-
-    if (selectedMonthsArray.length === 0) {
-      setError('Choose at least one month')
-      return
-    }
-
-    setIsLoading(true)
+  useEffect(() => {
+    if (!canLoad) return
+    const controller = new AbortController()
+    requestRef.current = controller
+    const search = settings.search
+    setLoading(true)
     setError(null)
-
-    try {
-      const user = await resolveUser(username)
-      const areaQuery = getAreaQuery(searchArea, radiusKm)
-      const [nearbyCounts, nonCasualCounts, expectedNearbyCounts, observedCounts] =
-        await Promise.all([
-          fetchSpeciesCounts({
-            ...areaQuery,
-            months: selectedMonthsArray,
-          }),
-          fetchSpeciesCounts({
-            ...areaQuery,
-            months: selectedMonthsArray,
-            qualityGrades: ['needs_id', 'research'],
-          }),
-          fetchSpeciesCounts({
-            ...areaQuery,
-            months: selectedMonthsArray,
-            expectedNearby: true,
-          }),
-          fetchSpeciesCounts({ userId: user.id }),
-        ])
-
-      const nonCasualCountsByTaxon = new Map(
-        nonCasualCounts.results.map((result) => [result.taxon.id, result.count]),
+    setSnapshot(null)
+    setPreview(false)
+    void (async () => {
+      let label = areaLabel(search.area, search.radius)
+      let searchedPlace: INatPlace | undefined
+      if (search.area.kind === 'place') {
+        const loaded = await fetchPlaceDetails(
+          search.area.id,
+          controller.signal,
+        )
+        label = loaded.display_name ?? loaded.name
+        searchedPlace = loaded
+      }
+      const result = await buildSnapshot(
+        search,
+        label,
+        controller.signal,
+        setProgress,
+        searchedPlace,
       )
-      const expectedNearbyTaxa = new Set(
-        expectedNearbyCounts.results.map((result) => result.taxon.id),
-      )
-      const observedTaxa = new Set(
-        observedCounts.results.map((result) => result.taxon.id),
-      )
-      const species = nearbyCounts.results.map((result) => {
-        const commonName =
-          result.taxon.preferred_common_name ?? result.taxon.name
-        const nonCasualCount = nonCasualCountsByTaxon.get(result.taxon.id) ?? 0
-
-        return {
-          id: result.taxon.id,
-          commonName,
-          scientificName: result.taxon.name,
-          count: result.count,
-          nonCasualCount,
-          casualOnly: nonCasualCount === 0,
-          expectedNearby: expectedNearbyTaxa.has(result.taxon.id),
-          iconicTaxon: result.taxon.iconic_taxon_name,
-          photoUrl: getPhotoUrl(result.taxon),
-          observedByUser: observedTaxa.has(result.taxon.id),
+      if (!controller.signal.aborted)
+        setSnapshot({ ...result, place: searchedPlace })
+    })()
+      .catch((cause) => {
+        if (!controller.signal.aborted) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : 'The search could not finish. Please try again.',
+          )
+          controller.abort()
         }
       })
-
-      setLocalDone(new Set())
-      setSnapshot({
-        builtAt: new Date().toISOString(),
-        user,
-        areaLabel: getAreaLabel(searchArea, radiusKm),
-        months: selectedMonthsArray,
-        observedTotal: observedCounts.totalResults,
-        species,
+      .finally(() => {
+        if (requestRef.current === controller) setLoading(false)
       })
-    } catch (snapshotError) {
-      setError(
-        snapshotError instanceof Error
-          ? snapshotError.message
-          : 'Could not build the snapshot',
-      )
-    } finally {
-      setIsLoading(false)
-    }
-  }, [radiusKm, searchArea, selectedMonthsArray, username])
+    return () => controller.abort()
+    // View options never refetch observations. The canonical key includes every search input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadKey, retry, canLoad])
 
+  const placeId = draft.area.kind === 'place' ? draft.area.id : null
   useEffect(() => {
-    if (didAutoBuild.current) {
+    if (!placeId) {
+      setPlace(null)
       return
     }
-
-    didAutoBuild.current = true
-    void buildSnapshot()
-  }, [buildSnapshot])
+    const controller = new AbortController()
+    void fetchPlaceDetails(placeId, controller.signal)
+      .then(setPlace)
+      .catch((cause) => {
+        if (!controller.signal.aborted) setPlaceError(cause.message)
+      })
+    return () => controller.abort()
+  }, [placeId])
 
   useEffect(() => {
-    const selectedPlaceName =
-      searchArea.kind === 'place' ? getPlaceName(searchArea.place) : ''
-    const query = placeQuery.trim()
-
-    if (query.length < 2 || query === selectedPlaceName) {
-      setPlaceResults([])
-      setPlaceDropdownOpen(false)
-      setPlaceActiveIndex(-1)
-      setIsSearchingPlaces(false)
+    if (placeQuery.trim().length < 2) {
+      setPlaces([])
+      setPlaceBusy(false)
       return
     }
-
-    const requestId = ++placeSearchRequestId.current
-    setIsSearchingPlaces(true)
-
-    const timeoutId = window.setTimeout(() => {
-      void searchPlaces(query)
-        .then((results) => {
-          if (requestId !== placeSearchRequestId.current) {
-            return
-          }
-
-          setPlaceResults(results)
-          setPlaceDropdownOpen(results.length > 0)
-          setPlaceActiveIndex(-1)
+    const controller = new AbortController()
+    setPlaceBusy(true)
+    const timer = window.setTimeout(() => {
+      const query = placeQuery.trim()
+      const result = /^\d+$/.test(query)
+        ? fetchPlaceDetails(Number(query), controller.signal).then((p) => [p])
+        : searchPlaces(query, controller.signal)
+      void result
+        .then((p) => {
+          setPlaces(p)
+          setPlaceError(
+            p.length
+              ? null
+              : 'No places found. Try a different name or place ID.',
+          )
         })
-        .catch(() => {
-          if (requestId !== placeSearchRequestId.current) {
-            return
-          }
-
-          setPlaceResults([])
-          setPlaceDropdownOpen(false)
+        .catch((cause) => {
+          if (!controller.signal.aborted) setPlaceError(cause.message)
         })
         .finally(() => {
-          if (requestId === placeSearchRequestId.current) {
-            setIsSearchingPlaces(false)
-          }
+          if (!controller.signal.aborted) setPlaceBusy(false)
         })
-    }, 250)
-
+    }, 300)
     return () => {
-      window.clearTimeout(timeoutId)
+      clearTimeout(timer)
+      controller.abort()
     }
-  }, [placeQuery, searchArea])
+  }, [placeQuery])
 
-  useEffect(() => {
-    const root = document.getElementById('root')
-
-    function updateBackToTop() {
-      const rootScrollTop = root?.scrollTop ?? 0
-      setShowBackToTop(Math.max(rootScrollTop, window.scrollY) > 700)
-    }
-
-    root?.addEventListener('scroll', updateBackToTop, { passive: true })
-    window.addEventListener('scroll', updateBackToTop, { passive: true })
-    updateBackToTop()
-
-    return () => {
-      root?.removeEventListener('scroll', updateBackToTop)
-      window.removeEventListener('scroll', updateBackToTop)
-    }
+  const onAreaChange = useCallback((area: Area) => {
+    setDraft((s) => ({ ...s, area }))
+    setPlaceQuery('')
+    setPlaceError(null)
   }, [])
-
-  function toggleGroup(groupKey: string) {
-    setSelectedGroups((currentGroups) => {
-      const nextGroups = new Set(currentGroups)
-
-      if (nextGroups.has(groupKey)) {
-        nextGroups.delete(groupKey)
-      } else {
-        nextGroups.add(groupKey)
-      }
-
-      return nextGroups
-    })
+  function updateView(patch: Partial<View>) {
+    const next = { ...settings, view: { ...view, ...patch } }
+    setSettings(next)
+    if (canLoad) writeUrl(next)
+    setCopyMessage('')
   }
-
-  function toggleMonth(month: number) {
-    setSelectedMonths((currentMonths) => {
-      const nextMonths = new Set(currentMonths)
-
-      if (nextMonths.has(month)) {
-        nextMonths.delete(month)
-      } else {
-        nextMonths.add(month)
-      }
-
-      return nextMonths
-    })
-  }
-
-  function toggleLocalDone(species: SpeciesCard) {
-    if (species.observedByUser) {
+  function submitSearch() {
+    const message = validateSearch(draft)
+    if (message) {
+      setError(message)
       return
     }
-
-    setLocalDone((currentDone) => {
-      const nextDone = new Set(currentDone)
-
-      if (nextDone.has(species.id)) {
-        nextDone.delete(species.id)
-      } else {
-        nextDone.add(species.id)
-      }
-
-      return nextDone
-    })
-  }
-
-  async function handlePlaceSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-
-    const query = placeQuery.trim()
-
-    if (placeActiveIndex >= 0 && placeResults[placeActiveIndex]) {
-      await selectPlace(placeResults[placeActiveIndex])
-      return
-    }
-
-    setIsSearchingPlaces(true)
+    const search = { ...draft, users: userNames(draft.users).join(',') }
+    const next = { search, view }
+    writeUrl(next, true)
+    setSettings(next)
+    setDraft(search)
+    setCanLoad(true)
     setError(null)
-
-    try {
-      if (/^\d+$/.test(query)) {
-        await selectPlace(await fetchPlaceDetails(Number(query)))
-        return
-      }
-
-      const results = await searchPlaces(query)
-      setPlaceResults(results)
-      setPlaceDropdownOpen(results.length > 0)
-      setPlaceActiveIndex(-1)
-    } catch (placeError) {
-      setError(
-        placeError instanceof Error
-          ? placeError.message
-          : 'Could not search iNaturalist places',
+    setCopyMessage('')
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      setBuilderOpen(false)
+      requestAnimationFrame(() =>
+        document.getElementById('results')?.scrollIntoView({ block: 'start' }),
       )
-    } finally {
-      setIsSearchingPlaces(false)
     }
+    if (searchKey(search) === loadKey) setRetry((v) => v + 1)
   }
-
-  function handlePlaceKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (!placeDropdownOpen || placeResults.length === 0) {
-      return
-    }
-
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      setPlaceActiveIndex((currentIndex) =>
-        Math.min(currentIndex + 1, placeResults.length - 1),
-      )
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      setPlaceActiveIndex((currentIndex) => Math.max(currentIndex - 1, 0))
-    } else if (event.key === 'Enter' && placeActiveIndex >= 0) {
-      event.preventDefault()
-      void selectPlace(placeResults[placeActiveIndex])
-    } else if (event.key === 'Escape') {
-      setPlaceDropdownOpen(false)
-      setPlaceActiveIndex(-1)
-    }
-  }
-
-  async function selectPlace(place: INatPlace) {
-    const requestId = ++placeSearchRequestId.current
-    setIsSearchingPlaces(true)
-    setError(null)
-
-    try {
-      let selectedPlace = place
-      let bounds =
-        findGeoJsonBounds(selectedPlace.bounding_box_geojson) ??
-        findGeoJsonBounds(selectedPlace.geometry_geojson)
-
-      if (!bounds) {
-        selectedPlace = await fetchPlaceDetails(place.id)
-        bounds =
-          findGeoJsonBounds(selectedPlace.bounding_box_geojson) ??
-          findGeoJsonBounds(selectedPlace.geometry_geojson)
+  function toggle(field: 'groups' | 'months', value: string | number) {
+    setDraft((current) => {
+      const values = current[field] as (string | number)[]
+      return {
+        ...current,
+        [field]: values.includes(value)
+          ? values.filter((v) => v !== value)
+          : [...values, value],
       }
-
-      if (requestId !== placeSearchRequestId.current) {
-        return
-      }
-
-      setSearchArea({ kind: 'place', place: selectedPlace, bounds })
-      setPlaceQuery(getPlaceName(selectedPlace))
-      setPlaceResults([])
-      setPlaceDropdownOpen(false)
-      setPlaceActiveIndex(-1)
-    } catch (placeError) {
-      setError(
-        placeError instanceof Error
-          ? placeError.message
-          : 'Could not load the iNaturalist place',
-      )
-    } finally {
-      if (requestId === placeSearchRequestId.current) {
-        setIsSearchingPlaces(false)
-      }
-    }
-  }
-
-  function scrollToTop() {
-    document.getElementById('root')?.scrollTo({
-      top: 0,
-      behavior: 'smooth',
     })
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-
-  function useMyLocation() {
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopyMessage('Link copied. Ready to share or bookmark.')
+    } catch {
+      setCopyMessage('Copy the address from your browser to share this search.')
+    }
+  }
+  function useLocation() {
     if (!navigator.geolocation) {
-      setError('This browser does not support location lookup')
+      setError(
+        'Location lookup is not available in this browser. Select an area on the map.',
+      )
       return
     }
-
-    setIsLocating(true)
-    setError(null)
-
+    setLocating(true)
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setSearchMode('circle')
-        setSearchArea({
+        onAreaChange({
           kind: 'circle',
           center: {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
+            lat: Number(position.coords.latitude.toFixed(6)),
+            lng: Number(position.coords.longitude.toFixed(6)),
           },
         })
-        setIsLocating(false)
+        setDrawing(false)
+        setMapVersion((v) => v + 1)
+        setLocating(false)
       },
       () => {
-        setError('Could not get your location')
-        setIsLocating(false)
+        setError('Location lookup was unavailable. Select an area on the map.')
+        setLocating(false)
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-      },
+      { timeout: 10000 },
     )
   }
 
-  const groupFilteredSpecies = useMemo(() => {
-    if (!snapshot) {
-      return []
-    }
-
-    return snapshot.species.filter((species) =>
-      selectedGroups.has(getSpeciesGroup(species.iconicTaxon)),
-    )
-  }, [selectedGroups, snapshot])
-
-  const locallyFilteredSpecies = useMemo(
+  const filtered = useMemo(
     () =>
-      groupFilteredSpecies.filter(
-        (species) =>
-          (!hideCasualOnly || !species.casualOnly) &&
-          (!hideUnexpected || species.expectedNearby),
+      snapshot?.species.filter(
+        (s) =>
+          (!view.hideCasual || !s.casualOnly || Boolean(s.externalCount)) &&
+          (!view.hideUnexpected ||
+            s.expectedNearby ||
+            Boolean(s.externalCount)) &&
+          (view.showObserved || !s.observedByUser),
+      ) ?? [],
+    [snapshot, view.hideCasual, view.hideUnexpected, view.showObserved],
+  )
+  const groups = useMemo(
+    () => groupSpecies(filtered, { sort: view.sort, grouping: view.grouping }),
+    [filtered, view.sort, view.grouping],
+  )
+  const visible = useMemo(
+    () => groups.flatMap((group) => group.species),
+    [groups],
+  )
+  const speciesGroupLabels = useMemo(
+    () =>
+      new Map(
+        groups.flatMap((group) =>
+          group.species.map((s) => [s.id, group.label] as const),
+        ),
       ),
-    [groupFilteredSpecies, hideCasualOnly, hideUnexpected],
+    [groups],
   )
+  const found = snapshot?.species.filter((s) => s.observedByUser).length ?? 0
+  const selectedAreaLabel =
+    draft.area.kind === 'place' && place?.id === draft.area.id
+      ? (place.display_name ?? place.name)
+      : areaLabel(draft.area, draft.radius)
 
-  const visibleSpecies = useMemo(
-    () =>
-      locallyFilteredSpecies.filter((species) => {
-        const isHidden =
-          species.observedByUser || localDone.has(species.id)
-        return showHiddenSpecies || !isHidden
-      }),
-    [localDone, locallyFilteredSpecies, showHiddenSpecies],
-  )
-
-  const lifeListCount = locallyFilteredSpecies.filter(
-    (species) => species.observedByUser,
-  ).length
-  const hiddenThisHikeCount = locallyFilteredSpecies.filter((species) =>
-    localDone.has(species.id),
-  ).length
-  const targetCount =
-    locallyFilteredSpecies.length - lifeListCount - hiddenThisHikeCount
-  const casualHiddenCount =
-    hideCasualOnly && snapshot
-      ? groupFilteredSpecies.filter((species) => species.casualOnly).length
-      : 0
-  const unexpectedHiddenCount =
-    hideUnexpected && snapshot
-      ? groupFilteredSpecies.filter((species) => !species.expectedNearby).length
-      : 0
-  const builtAt = snapshot
-    ? new Intl.DateTimeFormat(undefined, {
-        hour: 'numeric',
-        minute: '2-digit',
-      }).format(new Date(snapshot.builtAt))
-    : null
+  async function print() {
+    setPreview(true)
+    setPrinting(true)
+    setPrintMessage('Preparing photos and map for print.')
+    // Wait for React to show the preview before asking the browser to print it.
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    )
+    await document.fonts.ready
+    const images = Array.from(
+      document.querySelectorAll<HTMLImageElement>('.print-output img'),
+    )
+    const loaded = await Promise.all(
+      images.map(
+        (img) =>
+          new Promise<boolean>((resolve) => {
+            img.loading = 'eager'
+            if (img.complete) {
+              resolve(img.naturalWidth > 0)
+              return
+            }
+            const done = () => {
+              clearTimeout(timeout)
+              img.removeEventListener('load', done)
+              img.removeEventListener('error', done)
+              resolve(img.naturalWidth > 0)
+            }
+            const timeout = window.setTimeout(done, 15000)
+            img.addEventListener('load', done, { once: true })
+            img.addEventListener('error', done, { once: true })
+          }),
+      ),
+    )
+    setPrintMessage(
+      loaded.some((v) => !v)
+        ? 'Some images could not load. Names and the search boundary will still print.'
+        : '',
+    )
+    setPrinting(false)
+    window.print()
+  }
 
   return (
-    <div className="app-shell">
-      <header className="settings">
-        <div className="settings-panel">
-          <div className="settings-heading">
-            <div>
-              <p className="eyebrow">Nearby Lifers</p>
-              <h1>Snapshot builder</h1>
-            </div>
-          </div>
-
-          <div className="control-grid">
-            <label>
-              iNaturalist user
-              <input
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                spellCheck={false}
-              />
-            </label>
-            <label className="radius-control">
-              <span>Radius {Number.isFinite(radiusKm) ? radiusKm.toFixed(1) : '1.0'} km</span>
-              <input
-                type="range"
-                min="0.1"
-                max="10"
-                step="0.1"
-                value={radius}
-                disabled={searchArea.kind !== 'circle'}
-                onChange={(event) => setRadius(event.target.value)}
-              />
-            </label>
-          </div>
-
-          <div className="location-panel">
-            <div className="map-toolbar">
+    <>
+      <div className="app-shell screen-only">
+        <header className="site-header">
+          <a className="wordmark" href={window.location.pathname}>
+            <Leaf size={22} />
+            Nearby Lifers
+          </a>
+          <a
+            className="source-link"
+            href="https://www.inaturalist.org"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Powered by iNaturalist <ExternalLink size={13} />
+          </a>
+        </header>
+        <div className="workspace">
+          <section className="search-panel" aria-labelledby="search-title">
+            <div className="section-heading">
+              <h2 id="search-title">
+                {builderOpen ? 'Build your search' : 'Your saved search'}
+              </h2>
               <button
                 type="button"
-                className="location-button"
-                onClick={useMyLocation}
-                disabled={isLocating}
+                className="text-button"
+                aria-expanded={builderOpen}
+                aria-controls="search-form"
+                disabled={drawing}
+                onClick={() => setBuilderOpen((open) => !open)}
               >
-                {isLocating ? (
-                  <LoaderCircle size={18} aria-hidden="true" />
-                ) : (
-                  <LocateFixed size={18} aria-hidden="true" />
-                )}
-                Use my location
+                {builderOpen ? 'Hide controls' : 'Edit search'}
               </button>
-              <div className="segmented-control">
-                <button
-                  type="button"
-                  className={searchMode === 'circle' ? 'is-selected' : ''}
-                  onClick={() => setSearchMode('circle')}
-                >
-                  Point
-                </button>
-                <button
-                  type="button"
-                  className={searchMode === 'rectangle' ? 'is-selected' : ''}
-                  onClick={() => setSearchMode('rectangle')}
-                >
-                  Rectangle
-                </button>
-              </div>
             </div>
-
-            <LocationMap
-              area={searchArea}
-              mode={searchMode}
-              radiusKm={Number.isFinite(radiusKm) ? radiusKm : DEFAULT_RADIUS}
-              onCircleCenterSelected={handleCircleCenterSelected}
-              onRectangleSelected={handleRectangleSelected}
-            />
-
-            <form className="place-search" onSubmit={handlePlaceSearch}>
-              <div className="place-search-field">
-                <label>
-                  iNaturalist place
-                  <div className="input-action">
-                    <input
-                      value={placeQuery}
-                      onBlur={() => {
-                        window.setTimeout(() => setPlaceDropdownOpen(false), 150)
-                      }}
-                      onChange={(event) => {
-                        setPlaceQuery(event.target.value)
-                        setPlaceDropdownOpen(true)
-                      }}
-                      onFocus={() => {
-                        if (placeResults.length > 0) {
-                          setPlaceDropdownOpen(true)
-                        }
-                      }}
-                      onKeyDown={handlePlaceKeyDown}
-                      placeholder="Search places"
-                    />
-                    <button type="submit" disabled={isSearchingPlaces}>
-                      {isSearchingPlaces ? (
-                        <LoaderCircle size={16} aria-hidden="true" />
-                      ) : (
-                        <Search size={16} aria-hidden="true" />
-                      )}
-                      Search
-                    </button>
-                  </div>
-                </label>
-
-                {placeDropdownOpen && placeResults.length > 0 ? (
-                  <ul className="place-dropdown">
-                    {placeResults.map((place, index) => (
-                      <li
-                        className={placeActiveIndex === index ? 'is-active' : ''}
-                        key={place.id}
-                        onMouseDown={(event) => {
-                          event.preventDefault()
-                          void selectPlace(place)
-                        }}
-                      >
-                        <MapPin size={15} aria-hidden="true" />
-                        <span>{getPlaceName(place)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            </form>
-          </div>
-
-          <div className="filter-section">
-            <p className="control-label">Months</p>
-            <div className="chip-group month-grid" aria-label="Months">
-              {MONTH_NAMES.map((month, index) => {
-                const monthNumber = index + 1
-
-                return (
-                  <button
-                    type="button"
-                    key={month}
-                    aria-pressed={selectedMonths.has(monthNumber)}
-                    className={
-                      selectedMonths.has(monthNumber) ? 'is-selected' : ''
+            {!builderOpen && (
+              <p className="collapsed-summary">
+                {draft.users} · {selectedAreaLabel}
+              </p>
+            )}
+            {builderOpen && (
+              <form
+                id="search-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (!drawing) submitSearch()
+                }}
+              >
+                <UsernameField
+                  value={draft.users}
+                  onChange={(users) => setDraft((s) => ({ ...s, users }))}
+                />
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={draft.excludeUserCasual}
+                    onChange={(e) =>
+                      setDraft((s) => ({
+                        ...s,
+                        excludeUserCasual: e.target.checked,
+                      }))
                     }
-                    onClick={() => toggleMonth(monthNumber)}
+                  />
+                  Exclude users’ casual observations
+                </label>
+                <p className="hint">
+                  Research Grade and Needs ID always count. Casual observations
+                  count unless excluded. Life lists use all dates and locations.
+                </p>
+                <div className="field-section">
+                  <label htmlFor="record-source">Nearby record sources</label>
+                  <select
+                    id="record-source"
+                    value={draft.source}
+                    onChange={(event) =>
+                      setDraft((s) => ({
+                        ...s,
+                        source: event.target.value as typeof s.source,
+                      }))
+                    }
                   >
-                    {month}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          <div className="filter-section">
-            <p className="control-label">Life groups</p>
-            <div className="chip-group" aria-label="Life groups">
-              {TAXON_GROUPS.map((group) => (
-                <button
-                  type="button"
-                  key={group.key}
-                  aria-pressed={selectedGroups.has(group.key)}
-                  className={selectedGroups.has(group.key) ? 'is-selected' : ''}
-                  onClick={() => toggleGroup(group.key)}
-                >
-                  {group.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="settings-footer">
-            <label className="column-control">
-              Grid columns
-              <input
-                type="range"
-                min="2"
-                max="5"
-                value={columns}
-                onChange={(event) => setColumns(Number(event.target.value))}
-              />
-              <span>{columns}</span>
-            </label>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={showHiddenSpecies}
-                onChange={(event) => setShowHiddenSpecies(event.target.checked)}
-              />
-              <span>Show hidden species</span>
-            </label>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={hideCasualOnly}
-                onChange={(event) => setHideCasualOnly(event.target.checked)}
-              />
-              <span>Hide casual-only</span>
-            </label>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={hideUnexpected}
-                onChange={(event) => setHideUnexpected(event.target.checked)}
-              />
-              <span>Hide unexpected</span>
-            </label>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={buildSnapshot}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <LoaderCircle size={17} aria-hidden="true" />
-              ) : (
-                <RefreshCw size={17} aria-hidden="true" />
-              )}
-              Build snapshot
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main>
-        {snapshot ? (
-          <section className="snapshot-summary" aria-live="polite">
-            <strong>{targetCount} targets</strong>
-            <span>{lifeListCount} in life list</span>
-            {hiddenThisHikeCount > 0 ? (
-              <span>{hiddenThisHikeCount} hidden this hike</span>
-            ) : null}
-            <span>{snapshot.observedTotal} profile taxa</span>
-            <span>{formatMonths(snapshot.months)}</span>
-            <span>{snapshot.areaLabel}</span>
-            {casualHiddenCount > 0 ? (
-              <span>{casualHiddenCount} casual-only hidden</span>
-            ) : null}
-            {unexpectedHiddenCount > 0 ? (
-              <span>{unexpectedHiddenCount} unexpected hidden</span>
-            ) : null}
-            {builtAt ? <span>Built {builtAt}</span> : null}
-          </section>
-        ) : null}
-
-        {error ? <div className="message error">{error}</div> : null}
-
-        {isLoading && !snapshot ? (
-          <div className="message loading">
-            <LoaderCircle size={20} aria-hidden="true" />
-            Building the nearby species snapshot
-          </div>
-        ) : null}
-
-        {snapshot && visibleSpecies.length === 0 ? (
-          <div className="message">
-            No species match the current local filters.
-          </div>
-        ) : null}
-
-        {snapshot ? (
-          <section
-            className="species-grid"
-            style={{ '--grid-columns': columns } as CSSProperties}
-            aria-label="Nearby species"
-          >
-            {visibleSpecies.map((species) => {
-              const isHidden =
-                species.observedByUser || localDone.has(species.id)
-              const doneLabel = species.observedByUser
-                ? 'Already on your iNaturalist list'
-                : isHidden
-                  ? 'Restore to this hike'
-                  : 'Hide for this hike'
-
-              return (
-                <article
-                  className={`species-card ${isHidden ? 'is-done' : ''}`}
-                  key={species.id}
-                >
-                  <div className="photo-frame">
-                    {species.photoUrl ? (
-                      <img
-                        src={species.photoUrl}
-                        alt={species.commonName}
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="photo-fallback">
-                        {getFallbackLabel(species.commonName)}
-                      </div>
-                    )}
+                    {Object.entries(SOURCES).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  {draft.source !== 'inaturalist' && (
+                    <p className="hint">
+                      Life lists and photos stay on iNaturalist. eBird data in
+                      GBIF updates annually. Initial searches may take a few
+                      minutes.
+                    </p>
+                  )}
+                </div>
+                <div className="field-section">
+                  <div className="label-row">
+                    <label htmlFor="place-search">Search area</label>
                     <button
                       type="button"
-                      className="done-button"
-                      aria-label={doneLabel}
-                      title={doneLabel}
-                      onClick={() => toggleLocalDone(species)}
+                      className="text-button"
+                      onClick={useLocation}
+                      disabled={locating}
                     >
-                      {isHidden ? (
-                        <Check size={17} aria-hidden="true" />
+                      {locating ? (
+                        <LoaderCircle size={14} className="spin" />
                       ) : (
-                        <Circle size={18} aria-hidden="true" />
+                        <LocateFixed size={14} />
                       )}
+                      Use my location
                     </button>
-                    <span className="count-pill">{species.count}</span>
-                    <div className="badge-stack">
-                      {species.count < 5 ? (
-                        <span className="few-pill">Few</span>
-                      ) : null}
-                      {species.casualOnly ? (
-                        <span className="casual-pill">Casual</span>
-                      ) : null}
-                      {!species.expectedNearby ? (
-                        <span className="unexpected-pill">Range?</span>
-                      ) : null}
+                  </div>
+                  <div className="place-search">
+                    <SearchIcon size={17} />
+                    <input
+                      id="place-search"
+                      placeholder="Find an iNaturalist place or enter its ID"
+                      value={placeQuery}
+                      onChange={(e) => setPlaceQuery(e.target.value)}
+                      autoComplete="off"
+                      aria-controls="place-results"
+                      aria-expanded={places.length > 0}
+                    />
+                    {placeBusy && <LoaderCircle size={15} className="spin" />}
+                  </div>
+                  {places.length > 0 && (
+                    <ul className="place-results" id="place-results">
+                      {places.map((p) => (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onAreaChange({ kind: 'place', id: p.id })
+                              setPlace(p)
+                              setPlaces([])
+                              setMapVersion((v) => v + 1)
+                              setDrawing(false)
+                            }}
+                          >
+                            {p.display_name ?? p.name}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {placeError && (
+                    <p className="error-text" role="status">
+                      {placeError}
+                    </p>
+                  )}
+                  <LocationMap
+                    key={mapVersion}
+                    area={draft.area}
+                    radius={Math.min(100, Math.max(0.1, draft.radius))}
+                    place={place}
+                    onChange={onAreaChange}
+                    onDrawingChange={setDrawing}
+                  />
+                  <p className="area-label">{selectedAreaLabel}</p>
+                  {draft.area.kind === 'circle' && (
+                    <label className="radius-field">
+                      Radius in km
+                      <input
+                        type="number"
+                        min="0.1"
+                        max="100"
+                        step="0.1"
+                        value={draft.radius}
+                        onChange={(e) =>
+                          setDraft((s) => ({
+                            ...s,
+                            radius: Number(e.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                  )}
+                  {draft.area.kind === 'polygon' && (
+                    <p className="hint">
+                      Uses public observation coordinates inside your shape.
+                      Obscured locations may be imprecise. Large areas may need
+                      fewer months or life groups.
+                    </p>
+                  )}
+                </div>
+                <fieldset>
+                  <legend>Months observed</legend>
+                  <div className="label-row">
+                    <span className="hint">Across all years</span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() =>
+                        setDraft((s) => ({
+                          ...s,
+                          months: Array.from({ length: 12 }, (_, i) => i + 1),
+                        }))
+                      }
+                    >
+                      All year
+                    </button>
+                  </div>
+                  <div className="chips months">
+                    {MONTHS.map((m, i) => (
+                      <button
+                        type="button"
+                        key={m}
+                        aria-pressed={draft.months.includes(i + 1)}
+                        onClick={() => toggle('months', i + 1)}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>Life groups</legend>
+                  <div className="label-row">
+                    <span className="hint">Choose what you want to find</span>
+                    <div>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          setDraft((s) => ({
+                            ...s,
+                            groups: GROUPS.map((g) => g.key),
+                          }))
+                        }
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setDraft((s) => ({ ...s, groups: [] }))}
+                      >
+                        None
+                      </button>
                     </div>
                   </div>
-                  <div className="species-copy">
-                    <h2>
+                  <div className="chips">
+                    {GROUPS.map((g) => (
+                      <button
+                        type="button"
+                        key={g.key}
+                        aria-pressed={draft.groups.includes(g.key)}
+                        onClick={() => toggle('groups', g.key)}
+                      >
+                        {g.label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <button
+                  className="primary search-button"
+                  type="submit"
+                  disabled={drawing}
+                >
+                  {loading ? (
+                    <LoaderCircle size={18} className="spin" />
+                  ) : (
+                    <SearchIcon size={18} />
+                  )}
+                  {loading ? 'Restart search' : 'Find nearby lifers'}
+                </button>
+              </form>
+            )}
+          </section>
+          <main
+            className={`results-panel density-${view.density}`}
+            id="results"
+            aria-label="Search results"
+          >
+            <div className="result-actions">
+              <button
+                type="button"
+                disabled={pending || !canLoad}
+                onClick={copyLink}
+              >
+                <LinkIcon size={16} />
+                Copy search link
+              </button>
+              <button
+                type="button"
+                disabled={!snapshot || !visible.length || pending}
+                onClick={() => setPreview((v) => !v)}
+              >
+                <Printer size={16} />
+                {preview ? 'Close print preview' : 'Print options'}
+              </button>
+            </div>
+            {copyMessage && (
+              <p className="hint" role="status">
+                {copyMessage}
+              </p>
+            )}
+            {pending && (
+              <div className="notice">
+                {drawing
+                  ? 'Finish or cancel your drawing before searching.'
+                  : 'Search settings have changed. Run the search to update your results and shareable link.'}
+              </div>
+            )}
+            {error && (
+              <div className="notice error" role="alert">
+                {error}
+              </div>
+            )}
+            {loading && (
+              <div className="loading" role="status">
+                <LoaderCircle size={22} className="spin" />
+                <span>{progress}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestRef.current?.abort()
+                    setLoading(false)
+                    setError(
+                      'Search canceled. Run it again when you are ready.',
+                    )
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {snapshot && (
+              <>
+                <p className="result-context">
+                  {snapshot.areaLabel} ·{' '}
+                  {snapshot.search.months
+                    .slice()
+                    .sort((a, b) => a - b)
+                    .map((m) => MONTHS[m - 1])
+                    .join(', ')}
+                </p>
+                <p className="hint">
+                  {found.toLocaleString()} nearby species already observed.
+                  Compared with {snapshot.observedTotal.toLocaleString()}{' '}
+                  species across {snapshot.users.map((u) => u.login).join(', ')}
+                  .
+                </p>
+                <div className="result-filters">
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={view.hideCasual}
+                      onChange={(e) =>
+                        updateView({ hideCasual: e.target.checked })
+                      }
+                    />
+                    Hide nearby casual-only species
+                    {snapshot.external ? ' on iNaturalist' : ''}
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={view.hideUnexpected}
+                      onChange={(e) =>
+                        updateView({ hideUnexpected: e.target.checked })
+                      }
+                    />
+                    Only species marked expected nearby
+                    {snapshot.external ? ' on iNaturalist' : ''}
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={view.showObserved}
+                      onChange={(e) =>
+                        updateView({ showObserved: e.target.checked })
+                      }
+                    />
+                    Include already observed species
+                  </label>
+                </div>
+                {snapshot.external && (
+                  <div className="source-summary">
+                    <p className="hint">
+                      {SOURCES[snapshot.search.source]}. Counts show the larger
+                      source count for each species. Source totals are not
+                      added. The quality and expected-range filters apply to
+                      iNaturalist records. GBIF records remain eligible. GBIF
+                      results may be cached for up to one hour in this tab.
+                    </p>
+                    {snapshot.external.warnings.map((warning) => (
+                      <p className="hint" key={warning}>
+                        {warning}
+                      </p>
+                    ))}
+                    {snapshot.external.unmatched.length > 0 && (
+                      <details className="notice">
+                        <summary>
+                          {snapshot.external.unmatched.length} GBIF taxa need
+                          review and are excluded from the guide
+                        </summary>
+                        <p>
+                          These names could not be confidently matched to
+                          iNaturalist for checking your life list.
+                        </p>
+                        <ul>
+                          {snapshot.external.unmatched.map((taxon) => (
+                            <li key={taxon.key}>
+                              <a
+                                href={`https://www.gbif.org/species/${taxon.key}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {taxon.name}
+                              </a>{' '}
+                              · {taxon.count.toLocaleString()} records
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    <p className="hint">
                       <a
-                        href={`https://www.inaturalist.org/taxa/${species.id}`}
+                        href="https://www.gbif.org/"
                         target="_blank"
                         rel="noreferrer"
                       >
-                        {species.commonName}
+                        GBIF data
+                      </a>{' '}
+                      ·{' '}
+                      <a
+                        href="https://www.gbif.org/dataset/4fa7b334-ce0d-4e88-aaae-2e0c138d049e"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        eBird dataset
                       </a>
-                    </h2>
-                    <p>{species.scientificName}</p>
+                    </p>
                   </div>
-                </article>
-              )
-            })}
-          </section>
-        ) : null}
-      </main>
-
-      {showBackToTop ? (
-        <button
-          type="button"
-          className="back-to-top"
-          aria-label="Back to top"
-          title="Back to top"
-          onClick={scrollToTop}
-        >
-          <ArrowUp size={19} aria-hidden="true" />
-        </button>
-      ) : null}
-    </div>
+                )}
+                <div className="view-toolbar">
+                  <span className="hint">{visible.length} species shown</span>
+                  <div className="segmented" aria-label="List format">
+                    <button
+                      type="button"
+                      aria-pressed={view.layout === 'grid'}
+                      onClick={() => updateView({ layout: 'grid' })}
+                    >
+                      Photo grid
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={view.layout === 'list'}
+                      onClick={() => updateView({ layout: 'list' })}
+                    >
+                      Taxon checklist
+                    </button>
+                  </div>
+                </div>
+                <div className="view-options">
+                  <label>
+                    Group by
+                    <select
+                      value={view.grouping}
+                      onChange={(e) =>
+                        updateView({
+                          grouping: e.target.value as View['grouping'],
+                        })
+                      }
+                    >
+                      <option value="natural">Taxonomic groups</option>
+                      <option value="family">Families</option>
+                      <option value="order">Orders</option>
+                      <option value="none">None</option>
+                    </select>
+                  </label>
+                  <label>
+                    {view.grouping === 'none'
+                      ? 'Sort by'
+                      : 'Sort within groups'}
+                    <select
+                      value={view.sort}
+                      onChange={(e) =>
+                        updateView({ sort: e.target.value as View['sort'] })
+                      }
+                    >
+                      <option value="frequency">Most frequently seen</option>
+                      <option value="common">Common name</option>
+                      <option value="scientific">Scientific name</option>
+                    </select>
+                  </label>
+                  {!(preview && view.layout === 'grid') && (
+                    <label>
+                      Density
+                      <select
+                        value={view.density}
+                        onChange={(e) =>
+                          updateView({
+                            density: e.target.value as View['density'],
+                          })
+                        }
+                      >
+                        <option value="large">Large</option>
+                        <option value="comfortable">Comfortable</option>
+                        <option value="compact">Compact</option>
+                        <option value="dense">Extra compact</option>
+                      </select>
+                    </label>
+                  )}
+                </div>
+                {preview && (
+                  <section
+                    className="print-controls"
+                    aria-label="Print settings"
+                  >
+                    <h3>Print settings</h3>
+                    <div className="print-options">
+                      <label>
+                        Print as
+                        <select
+                          value={view.printMode}
+                          onChange={(event) =>
+                            updateView({
+                              printMode: event.target
+                                .value as View['printMode'],
+                            })
+                          }
+                        >
+                          <option value="sheets">Individual sheets</option>
+                          <option value="booklet">Folded booklet</option>
+                        </select>
+                      </label>
+                      <label>
+                        Paper size
+                        <select
+                          value={
+                            view.printMode === 'booklet' ? 'letter' : view.paper
+                          }
+                          disabled={view.printMode === 'booklet'}
+                          onChange={(e) =>
+                            updateView({
+                              paper: e.target.value as View['paper'],
+                            })
+                          }
+                        >
+                          {Object.entries(PAPERS).map(([key, paper]) => (
+                            <option key={key} value={key}>
+                              {paper.label} · {paper.dimensions}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    {view.layout === 'grid' && (
+                      <>
+                        <div className="print-options grid-dimensions">
+                          <NumberField
+                            label="Columns per page"
+                            max={8}
+                            value={printGrid(view).columns}
+                            onChange={(value) =>
+                              updateView({ gridColumns: value })
+                            }
+                          />
+                          <NumberField
+                            label="Rows per page (maximum)"
+                            max={8}
+                            value={printGrid(view).rows}
+                            onChange={(value) =>
+                              updateView({ gridRows: value })
+                            }
+                          />
+                          <NumberField
+                            label="Font size (pt)"
+                            min={6}
+                            max={24}
+                            value={view.gridFontSize ?? 9}
+                            onChange={(value) =>
+                              updateView({ gridFontSize: value })
+                            }
+                          />
+                        </div>
+                        <p className="hint">
+                          Photos crop to fit your grid. Every page keeps the
+                          same photo size, with unused cells left empty.
+                        </p>
+                        <label className="checkbox print-credit-option">
+                          <input
+                            type="checkbox"
+                            checked={view.showPhotoCredits}
+                            onChange={(event) =>
+                              updateView({
+                                showPhotoCredits: event.target.checked,
+                              })
+                            }
+                          />
+                          Show photo credits
+                        </label>
+                        {!gridFits && (
+                          <div className="notice grid-warning" role="alert">
+                            Photos and text need more room on this paper. Choose
+                            fewer rows or columns, a smaller font or larger
+                            paper, or hide photo credits.
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {view.printMode === 'booklet' ? (
+                      <>
+                        <label className="booklet-title-label">
+                          Cover title
+                          <input
+                            value={view.bookletTitle}
+                            maxLength={120}
+                            placeholder="Nearby Lifers"
+                            onChange={(event) =>
+                              updateView({ bookletTitle: event.target.value })
+                            }
+                          />
+                        </label>
+                        <NumberField
+                          label="Warn above this many sheets"
+                          className="sheet-limit-label"
+                          max={1000}
+                          value={view.bookletSheetLimit}
+                          onChange={(value) =>
+                            updateView({ bookletSheetLimit: value })
+                          }
+                        />
+                        <p className="hint">
+                          {bookletSheets} physical sheets, printed double-sided.
+                          Each sheet makes four booklet pages.
+                        </p>
+                        {bookletSheets > view.bookletSheetLimit && (
+                          <div className="notice sheet-warning" role="alert">
+                            This booklet uses {bookletSheets} physical sheets,
+                            above your {view.bookletSheetLimit}-sheet warning
+                            limit. Check your staples’ capacity or reduce the
+                            search before printing.
+                          </div>
+                        )}
+                        <p className="hint">
+                          Print on Letter paper in landscape, double-sided,
+                          flipping on the short edge. Use 100% scale and turn
+                          off browser headers and footers. The pages are already
+                          arranged for folding, so leave your printer’s booklet
+                          and multiple-pages-per-sheet options off.
+                        </p>
+                        <p className="hint">
+                          Stack the sheets in order, fold to 5.5 × 8.5 inches,
+                          and use the three staple guides along the fold. Each
+                          half-inch guide has two hole marks. Their centers are
+                          1.5 inches from either end and at the midpoint. Pages
+                          include an extra 5 mm of margin at the spine.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="hint">
+                        The preview below uses your visible species and selected
+                        format. Match the paper size in your print dialog, use
+                        100% scale, and turn off browser headers and footers.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={print}
+                      disabled={
+                        printing ||
+                        pending ||
+                        !visible.length ||
+                        (view.layout === 'grid' && !gridFits)
+                      }
+                    >
+                      {printing ? (
+                        <LoaderCircle size={16} className="spin" />
+                      ) : (
+                        <Printer size={16} />
+                      )}
+                      Print or save PDF
+                    </button>
+                    {printMessage && (
+                      <p className="hint" role="status">
+                        {printMessage}
+                      </p>
+                    )}
+                  </section>
+                )}
+                {!visible.length && (
+                  <div className="empty-state">
+                    <Leaf size={28} />
+                    <h3>No species match this search.</h3>
+                    <p>
+                      Try more life groups, a different area, or fewer display
+                      filters.
+                    </p>
+                  </div>
+                )}
+                {!preview && view.layout === 'grid' && (
+                  <section className="species-grid" aria-label="Nearby species">
+                    {visible.map((species) => (
+                      <article
+                        className={`species-card ${species.observedByUser ? 'observed' : ''}`}
+                        data-group={speciesGroupLabels.get(species.id)}
+                        key={species.id}
+                      >
+                        <div className="photo-frame">
+                          {species.photoUrl ? (
+                            <img
+                              src={species.photoUrl}
+                              alt={species.commonName}
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none'
+                              }}
+                            />
+                          ) : (
+                            <Leaf className="fallback-leaf" size={32} />
+                          )}
+                          <span
+                            className="count-pill"
+                            title={recordDetails(species)}
+                          >
+                            {recordLabel(species)}
+                          </span>
+                          {species.observedByUser && (
+                            <span className="seen-pill">
+                              <Check size={12} />
+                              Seen
+                            </span>
+                          )}
+                        </div>
+                        <div className="species-copy">
+                          {view.grouping !== 'none' && (
+                            <p className="species-group-label">
+                              {speciesGroupLabels.get(species.id)}
+                            </p>
+                          )}
+                          <h3>
+                            <a
+                              href={`https://www.inaturalist.org/taxa/${species.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {species.commonName}
+                            </a>
+                          </h3>
+                          <p>
+                            <i>{species.scientificName}</i>
+                          </p>
+                          <div className="species-tags">
+                            {species.casualOnly && !species.externalCount && (
+                              <span>Casual only</span>
+                            )}
+                            {!species.expectedNearby &&
+                              !species.externalCount && (
+                                <span>Range uncertain</span>
+                              )}
+                          </div>
+                          {species.externalCount && (
+                            <details className="photo-credit">
+                              <summary>Record sources</summary>
+                              {recordDetails(species)}
+                            </details>
+                          )}
+                          {species.photoCredit && (
+                            <details className="photo-credit">
+                              <summary>Photo credit</summary>
+                              {species.photoCredit}
+                            </details>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                  </section>
+                )}
+                {!preview && view.layout === 'list' && (
+                  <section
+                    className="taxon-checklist"
+                    aria-label="Nearby species"
+                  >
+                    {groups.map(({ key, label, scientificName, species }) => (
+                      <section key={key}>
+                        {label && (
+                          <h3 title={scientificName}>
+                            {label}
+                            <span>{species.length}</span>
+                          </h3>
+                        )}
+                        <ul>
+                          {species.map((s) => (
+                            <li key={s.id}>
+                              <span
+                                className={`check-box ${s.observedByUser ? 'checked' : ''}`}
+                                aria-label={
+                                  s.observedByUser
+                                    ? 'Already observed'
+                                    : undefined
+                                }
+                              >
+                                {s.observedByUser && <Check size={12} />}
+                              </span>
+                              <div>
+                                <a
+                                  href={`https://www.inaturalist.org/taxa/${s.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {s.commonName}
+                                </a>
+                                <i>{s.scientificName}</i>
+                              </div>
+                              <span
+                                className="record-count"
+                                title={recordDetails(s)}
+                              >
+                                {recordLabel(s)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ))}
+                  </section>
+                )}
+              </>
+            )}
+          </main>
+        </div>
+        <footer className="site-footer">
+          <a
+            href="#top"
+            onClick={(event) => {
+              event.preventDefault()
+              window.scrollTo({ top: 0, behavior: 'smooth' })
+            }}
+          >
+            <ArrowUp size={14} />
+            Back to top
+          </a>
+        </footer>
+      </div>
+      {snapshot && (
+        <PrintPreview
+          onBookletSheetsChange={setBookletSheets}
+          onGridFitsChange={setGridFits}
+          snapshot={snapshot}
+          species={visible}
+          view={view}
+          visible={preview}
+        />
+      )}
+    </>
   )
 }
-
-export default App

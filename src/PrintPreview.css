@@ -1,0 +1,574 @@
+.print-output {
+  --print-font: 9pt;
+  --print-small: 7pt;
+  color: #111;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.print-output:not(.preview-visible) {
+  position: absolute;
+  left: -20000px;
+  top: 0;
+}
+.print-output.preview-visible {
+  overflow-x: auto;
+  background: #e1e4db;
+  padding: 25px 20px 45px;
+}
+.preview-caption {
+  text-align: center;
+  margin: 0 0 18px;
+  color: #536152;
+  font-size: 12px;
+}
+.sheet-stack {
+  width: var(--paper-width);
+  margin: auto;
+}
+.print-sheet {
+  width: var(--paper-width);
+  height: var(--paper-height);
+  padding: 9mm;
+  display: flex;
+  flex-direction: column;
+  gap: 3mm;
+  background: white;
+  color: #111;
+  box-shadow: 0 3px 18px #27372720;
+  margin: 0 auto 25px;
+}
+.sheet-header {
+  flex: 0 0 auto;
+  padding-bottom: 2.5mm;
+  border-bottom: 0.3mm solid #333;
+}
+.sheet-header > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1mm 3mm;
+}
+.sheet-header strong {
+  font-family: Georgia, serif;
+  font-size: 19pt;
+  font-weight: normal;
+  letter-spacing: -0.5pt;
+}
+.sheet-header span {
+  font-size: 7pt;
+}
+.sheet-header p {
+  margin: 1.1mm 0 0;
+  font-size: 7pt;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.sheet-body {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.sheet-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 3mm;
+  font-size: 6pt;
+  line-height: 1.2;
+  border-top: 0.2mm solid #aaa;
+  padding-top: 2mm;
+  flex: 0 0 auto;
+}
+.sheet-footer > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sheet-footer > span:last-child {
+  flex-shrink: 0;
+}
+.booklet-output .sheet-footer {
+  font-size: 9pt;
+  border-top: 0;
+  padding-top: 0;
+}
+.page-group-header {
+  font-size: 9pt;
+  line-height: 1.2;
+  min-height: var(--group-header-height, 0px);
+  flex: 0 0 auto;
+  overflow-wrap: anywhere;
+}
+.group-header-measure .page-group-header {
+  min-height: 0;
+}
+.print-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--print-columns), minmax(0, 1fr));
+  grid-auto-rows: calc(
+    (100% - (var(--print-rows) - 1) * 3mm) / var(--print-rows)
+  );
+  align-content: start;
+  gap: 3mm 2.5mm;
+}
+.print-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  break-inside: avoid;
+}
+.print-visual {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 8mm;
+}
+.print-photo {
+  position: relative;
+  width: 100%;
+  min-height: 8mm;
+  align-self: center;
+  flex: 1 1 0;
+  background: white;
+}
+.print-photo img {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  object-fit: cover;
+  object-position: center;
+}
+.paper-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.25mm solid #222;
+  width: 3.3mm;
+  height: 3.3mm;
+  font-size: 8pt;
+  line-height: 1;
+  background: white;
+  flex-shrink: 0;
+}
+.print-names {
+  margin-top: 1.2mm;
+  flex: 0 0 auto;
+}
+.print-card-info {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: var(--info-height, 0px);
+}
+.print-names strong,
+.print-names i {
+  display: block;
+  font-size: var(--grid-font);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.print-names i {
+  margin-top: 0.7mm;
+}
+.print-credit {
+  margin-top: 0.6mm;
+  font-size: var(--grid-font);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  flex: 0 0 auto;
+  color: #444;
+}
+.print-records {
+  position: absolute;
+  bottom: 1mm;
+  right: 1mm;
+  max-width: calc(100% - 2mm);
+  padding: 0.5mm 0.8mm;
+  color: #333;
+  background: #fff;
+  font-size: var(--grid-font);
+  line-height: 1.15;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.density-compact {
+  --print-font: 8pt;
+  --print-small: 6.5pt;
+}
+.density-large {
+  --print-font: 11pt;
+  --print-small: 9pt;
+}
+.paper-a6 .sheet-header strong {
+  font-size: 16pt;
+}
+.paper-a6 .sheet-header span,
+.paper-a6 .sheet-header p {
+  font-size: 6pt;
+}
+.paper-a6.density-compact {
+  --print-font: 7.5pt;
+  --print-small: 6pt;
+}
+.print-measure {
+  position: absolute;
+  left: -40000px;
+  top: 0;
+  visibility: hidden;
+}
+.print-measure .print-sheet {
+  margin: 0;
+}
+.measure-column {
+  width: calc((100% - (var(--list-columns) - 1) * 5mm) / var(--list-columns));
+}
+.print-list-columns {
+  display: grid;
+  grid-template-columns: repeat(var(--list-columns), minmax(0, 1fr));
+  gap: 5mm;
+}
+.print-list-column {
+  min-width: 0;
+}
+.print-group-heading {
+  font-size: calc(var(--print-font) + 1pt);
+  line-height: 1.2;
+  margin: 0;
+  padding: 2mm 0 1mm;
+  border-bottom: 0.2mm solid #666;
+  font-weight: bold;
+}
+.print-list-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2mm;
+  padding: 1.5mm 0;
+  border-bottom: 0.15mm solid #ddd;
+  break-inside: avoid;
+}
+.print-list-row .paper-checkbox {
+  margin-top: 0.3mm;
+}
+.print-list-row > div {
+  min-width: 0;
+}
+.print-list-row strong {
+  display: block;
+  font-size: var(--print-font);
+  font-weight: normal;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.print-list-row i {
+  display: block;
+  margin-top: 0.4mm;
+  font-size: var(--print-small);
+  line-height: 1.2;
+  color: #444;
+  overflow-wrap: anywhere;
+}
+.density-compact .print-list-row {
+  padding: 1mm 0;
+}
+@media print {
+  html,
+  body,
+  #root {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-width: 0;
+    background: white;
+  }
+  .screen-only,
+  .print-measure {
+    display: none !important;
+  }
+  .print-output,
+  .print-output:not(.preview-visible),
+  .print-output.preview-visible {
+    display: block;
+    position: static;
+    width: auto;
+    padding: 0;
+    background: white;
+    overflow: visible;
+  }
+  .sheet-stack {
+    margin: 0;
+  }
+  .print-sheet {
+    margin: 0;
+    box-shadow: none;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+  }
+  .print-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  .print-photo,
+  .paper-checkbox {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+.density-dense {
+  --print-font: 7pt;
+  --print-small: 6pt;
+}
+.density-dense .print-list-row {
+  padding: 0.6mm 0;
+  gap: 1.3mm;
+}
+.density-dense .print-list-row > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4mm 1.5mm;
+}
+.density-dense .print-list-row strong,
+.density-dense .print-list-row i {
+  display: inline;
+  margin: 0;
+}
+.density-dense .print-list-row .paper-checkbox {
+  width: 2.5mm;
+  height: 2.5mm;
+}
+
+.booklet-stack {
+  width: 279.4mm;
+}
+.booklet-sheet-wrapper {
+  margin-bottom: 24px;
+}
+.booklet-side-label {
+  font-size: 12px;
+  text-align: center;
+  margin: 0 0 10px;
+  color: #536152;
+}
+.booklet-side {
+  width: 279.4mm;
+  height: 215.9mm;
+  display: flex;
+  gap: 0;
+  background: white;
+  box-shadow: 0 3px 18px #27372720;
+  position: relative;
+}
+.staple-guides {
+  position: absolute;
+  left: calc(50% - 1mm);
+  top: 0;
+  width: 2mm;
+  height: 215.9mm;
+  z-index: 1000;
+  pointer-events: none;
+}
+.booklet-slot {
+  width: 139.7mm;
+  flex: 0 0 139.7mm;
+}
+.booklet-side .print-sheet {
+  margin: 0;
+  box-shadow: none;
+}
+.booklet-output .print-sheet {
+  padding-left: 9mm;
+  padding-right: 14mm;
+}
+.booklet-slot:nth-child(2) .print-sheet {
+  padding-left: 14mm;
+  padding-right: 9mm;
+}
+.booklet-cover {
+  justify-content: center;
+  padding: 15mm;
+}
+.booklet-cover h1 {
+  font-family: Georgia, serif;
+  font-weight: normal;
+  font-size: 29pt;
+  line-height: 1.15;
+  margin: 0 0 8mm;
+  overflow-wrap: anywhere;
+}
+.booklet-cover p {
+  font-size: 10pt;
+  margin: 0 0 2mm;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.booklet-cover .booklet-owner {
+  margin-bottom: 5mm;
+}
+.booklet-cover .booklet-owner,
+.booklet-cover .booklet-tool-name {
+  font-family: Georgia, serif;
+  font-size: 22pt;
+}
+.booklet-cover .booklet-date {
+  margin-top: 5mm;
+  font-size: 12pt;
+}
+.booklet-back {
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 15mm;
+}
+.booklet-credit {
+  text-align: center;
+  font-size: 6.5pt;
+  color: #555;
+}
+.booklet-credit p {
+  margin: 2mm 0 1mm;
+}
+.booklet-credit a {
+  color: inherit;
+  text-decoration: none;
+}
+.booklet-qr {
+  display: block;
+  width: 21mm;
+  height: 21mm;
+  margin: auto;
+}
+.booklet-page-title {
+  font:
+    normal 21pt/1.2 Georgia,
+    serif;
+  margin: 0 0 2mm;
+}
+.booklet-parameters-page {
+  gap: 2mm;
+}
+.booklet-map {
+  margin: 0;
+  flex: 0 0 auto;
+}
+.booklet-parameters-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2mm;
+}
+.print-map-canvas {
+  width: 100%;
+  height: 52mm;
+  background: #66756a;
+  border: 0.2mm solid #92998f;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+.booklet-map figcaption {
+  margin-top: 1mm;
+  font-size: 9pt;
+  line-height: 1.2;
+}
+.booklet-parameters {
+  margin: 0;
+  font-size: 9pt;
+  line-height: 1.25;
+  flex: 0 0 auto;
+}
+.booklet-parameters > div {
+  display: grid;
+  grid-template-columns: 30mm 1fr;
+  gap: 2mm;
+  padding: 0.8mm 0;
+  border-bottom: 0.15mm solid #ddd;
+}
+.booklet-parameters dt {
+  font-weight: bold;
+}
+.booklet-parameters dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.booklet-parameters-page > .sheet-footer {
+  margin-top: auto;
+}
+.contents-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 2mm;
+  padding: 2mm 0;
+  font-size: 12pt;
+  line-height: 1.35;
+}
+.contents-entry > span:first-child {
+  max-width: calc(100% - 12mm);
+  overflow-wrap: anywhere;
+}
+.contents-dots {
+  flex: 1;
+  border-bottom: 0.2mm dotted #aaa;
+}
+.contents-entry strong {
+  min-width: 8mm;
+  text-align: right;
+}
+.contents-columns {
+  display: grid;
+  grid-template-columns: repeat(var(--contents-columns), minmax(0, 1fr));
+  gap: 5mm;
+}
+.contents-measure-column {
+  width: calc(
+    (100% - (var(--contents-columns) - 1) * 5mm) / var(--contents-columns)
+  );
+}
+.density-compact .contents-entry,
+.density-dense .contents-entry {
+  padding: 1mm 0;
+  gap: 1mm;
+}
+.booklet-blank {
+  justify-content: center;
+  align-items: center;
+}
+.blank-page-label {
+  font-size: 10pt;
+  color: #8a9286;
+}
+@media print {
+  .booklet-sheet-wrapper {
+    margin: 0;
+    break-after: page;
+    page-break-after: always;
+  }
+  .booklet-sheet-wrapper:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  .booklet-side {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+  .booklet-side .print-sheet {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
+
+.booklet-print-instructions {
+  font-size: 9pt;
+  line-height: 1.3;
+  margin: 2mm 0 0;
+  flex: 0 0 auto;
+}
+.booklet-print-instructions h3 {
+  font-size: inherit;
+  margin: 0 0 1mm;
+}
+.booklet-print-instructions p {
+  margin: 0;
+}
+
+.booklet-parameters-page:has(.external-source-filter) .print-map-canvas {
+  height: 30mm;
+}
