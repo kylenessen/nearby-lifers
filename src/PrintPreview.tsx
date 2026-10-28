@@ -75,6 +75,7 @@ function PrintCard({
   color,
   credits,
   visible,
+  metrics,
 }: {
   species: Species
   label?: string
@@ -82,12 +83,21 @@ function PrintCard({
   color?: string
   credits: boolean
   visible: boolean
+  metrics?: { group: number; info: number }
 }) {
   return (
     <div
       className="print-card"
       data-species-id={species.id}
       data-group={groupKey}
+      style={
+        metrics
+          ? ({
+              '--group-height': `${metrics.group}px`,
+              '--info-height': `${metrics.info}px`,
+            } as CSSProperties)
+          : undefined
+      }
     >
       {label && (
         <div className="print-card-group" style={{ backgroundColor: color }}>
@@ -106,21 +116,23 @@ function PrintCard({
           />
         )}
       </div>
-      <div className="print-names">
-        <strong>{species.commonName}</strong>
-        <i>{species.scientificName}</i>
+      <div className="print-card-info">
+        <div className="print-names">
+          <strong>{species.commonName}</strong>
+          <i>{species.scientificName}</i>
+        </div>
+        <span
+          className="print-records"
+          title="Records in the selected area and months"
+        >
+          {species.count.toLocaleString()} records
+        </span>
+        {credits && (
+          <small className="print-credit">
+            {species.photoCredit ?? 'Photo unavailable'}
+          </small>
+        )}
       </div>
-      <span
-        className="print-records"
-        title="Records in the selected area and months"
-      >
-        {species.count.toLocaleString()} records
-      </span>
-      {credits && (
-        <small className="print-credit">
-          {species.photoCredit ?? 'Photo unavailable'}
-        </small>
-      )}
     </div>
   )
 }
@@ -151,7 +163,9 @@ export function PrintPreview({
   const contentsMeasure = useRef<HTMLDivElement>(null)
   const [packed, setPacked] = useState<ListColumn[]>([])
   const [contentsRows, setContentsRows] = useState<number[][]>([])
-  const [gridPages, setGridPages] = useState<number[][]>([])
+  const [gridMetrics, setGridMetrics] = useState<
+    Map<number, { group: number; info: number }>
+  >(new Map())
   const groups = useMemo(
     () => groupSpecies(species, { sort: view.sort, grouping: view.grouping }),
     [species, view.grouping, view.sort],
@@ -184,11 +198,21 @@ export function PrintPreview({
     () => groups.flatMap((g) => g.species),
     [groups],
   )
+  const gridPages = useMemo(
+    () =>
+      packGrid(
+        orderedSpecies.map((s) => s.id),
+        columns,
+        rows,
+      ),
+    [orderedSpecies, columns, rows],
+  )
   const grouped = view.grouping !== 'none'
   const style = {
     '--paper-width': `${paper.width}mm`,
     '--paper-height': `${paper.height}mm`,
     '--print-columns': columns,
+    '--print-rows': rows,
     '--grid-font': `${view.gridFontSize ?? 10}pt`,
     '--list-columns': listColumns,
     '--contents-columns': contentsColumns,
@@ -235,17 +259,42 @@ export function PrintPreview({
     const body = element.querySelector('.sheet-body')!
     const capacity = body.getBoundingClientRect().height - 1
     const gap = parseFloat(getComputedStyle(body).rowGap)
-    const items = cards.map((card) => ({
-      id: Number(card.dataset.speciesId),
-      height: card.getBoundingClientRect().height,
-    }))
-    setGridPages(packGrid(items, columns, rows, capacity, gap))
-    onGridFitsChange?.(items.every((item) => item.height <= capacity))
+    const measured = new Map(
+      cards.map((card) => [
+        Number(card.dataset.speciesId),
+        {
+          group:
+            card.querySelector('.print-card-group')?.getBoundingClientRect()
+              .height ?? 0,
+          info: card.querySelector('.print-card-info')!.getBoundingClientRect()
+            .height,
+        },
+      ]),
+    )
+    const aligned = new Map<number, { group: number; info: number }>()
+    let fits = true
+    for (const page of gridPages) {
+      const rowCount = Math.ceil(page.length / columns)
+      const height = (capacity - gap * (rowCount - 1)) / rowCount
+      for (let start = 0; start < page.length; start += columns) {
+        const ids = page.slice(start, start + columns)
+        const metrics = {
+          group: Math.max(...ids.map((id) => measured.get(id)!.group)),
+          info: Math.max(...ids.map((id) => measured.get(id)!.info)),
+        }
+        if (metrics.group + metrics.info + (8 * 96) / 25.4 > height)
+          fits = false
+        ids.forEach((id) => aligned.set(id, metrics))
+      }
+    }
+    setGridMetrics(aligned)
+    onGridFitsChange?.(fits)
   }, [
     orderedSpecies,
     groups,
     columns,
     rows,
+    gridPages,
     onGridFitsChange,
     paperKey,
     booklet,
@@ -332,7 +381,7 @@ export function PrintPreview({
   const header = !booklet && (
     <Header snapshot={snapshot} count={species.length} view={view} />
   )
-  const card = (s: Species) => (
+  const card = (s: Species, measured = false) => (
     <PrintCard
       key={s.id}
       species={s}
@@ -341,6 +390,7 @@ export function PrintPreview({
       color={groupColors.get(speciesGroups.get(s.id)!)}
       credits={view.showPhotoCredits}
       visible={visible}
+      metrics={measured ? undefined : gridMetrics.get(s.id)}
     />
   )
 
@@ -353,7 +403,16 @@ export function PrintPreview({
             key={index}
           >
             {header}
-            <div className="sheet-body print-grid">{page.map(card)}</div>
+            <div
+              className="sheet-body print-grid"
+              style={
+                {
+                  '--print-rows': Math.ceil(page.length / columns),
+                } as CSSProperties
+              }
+            >
+              {page.map((s) => card(s))}
+            </div>
             {footer(booklet ? plan.contentStart + index : index + 1)}
           </article>
         ))
@@ -403,7 +462,7 @@ export function PrintPreview({
             : `${paper.label} · ${paper.dimensions} · ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}`}{' '}
           ·{' '}
           {view.layout === 'grid'
-            ? `${columns} columns · Up to ${rows} rows per page · ${view.gridFontSize ?? 10} pt · Square photos`
+            ? `${columns} columns · Up to ${rows} rows per page · ${view.gridFontSize ?? 10} pt · Photos cropped to fill the page`
             : 'Grouped checklist'}
         </p>
       )}
@@ -412,7 +471,7 @@ export function PrintPreview({
           <div className="print-sheet">
             {header}
             <div className="sheet-body print-grid">
-              {orderedSpecies.map(card)}
+              {orderedSpecies.map((s) => card(s, true))}
             </div>
             {footer(booklet ? plan.contentStart : 1)}
           </div>

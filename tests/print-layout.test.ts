@@ -17,45 +17,28 @@ test('every sheet and density defaults to three columns and four rows', () => {
       assert.deepEqual(printGrid(view), { columns: 3, rows: 4 })
     }
 })
-test('photo grids preserve full rows, their spacing, and every species within page height', () => {
-  const items = Array.from({ length: 37 }, (_, id) => ({ id, height: 80 }))
-  const pages = packGrid(items, 3, 4, 260, 10)
-  assert.deepEqual(
-    pages.flat(),
-    items.map((item) => item.id),
-  )
+test('photo grids balance full rows across the fewest pages without losing species', () => {
+  const ids = Array.from({ length: 37 }, (_, id) => id)
+  const pages = packGrid(ids, 3, 4)
+  assert.deepEqual(pages.flat(), ids)
   assert.deepEqual(
     pages.map((p) => p.length),
-    [9, 9, 9, 9, 1],
+    [12, 9, 9, 7],
   )
-  assert.deepEqual(packGrid([], 3, 4, 260, 10), [])
+  assert.deepEqual(packGrid([], 3, 4), [])
   assert.deepEqual(
-    packGrid(items, 1, 1, 1000, 10),
-    items.map(({ id }) => [id]),
+    packGrid(ids, 1, 1),
+    ids.map((id) => [id]),
   )
-  const variable = items.map((item) => ({
-    ...item,
-    height: item.id % 5 ? 70 : 110,
-  }))
-  const packed = packGrid(variable, 3, 3, 240, 12)
-  assert.deepEqual(
-    packed.flat(),
-    items.map((item) => item.id),
-  )
-  for (const page of packed) {
-    const heights = []
-    for (let index = 0; index < page.length; index += 3)
-      heights.push(
-        Math.max(
-          ...page.slice(index, index + 3).map((id) => variable[id].height),
-        ),
-      )
-    assert.ok(heights.length <= 3)
-    assert.ok(
-      heights.reduce((sum, height) => sum + height, 0) +
-        (heights.length - 1) * 12 <=
-        240,
-    )
+  for (const count of [1, 3, 4, 15, 16, 17, 42, 83]) {
+    const species = Array.from({ length: count }, (_, id) => id)
+    const packed = packGrid(species, 4, 4)
+    assert.deepEqual(packed.flat(), species)
+    assert.equal(packed.length, Math.ceil(count / 16))
+    assert.ok(packed.slice(0, -1).every((page) => page.length % 4 === 0))
+    const rows = packed.map((page) => Math.ceil(page.length / 4))
+    assert.ok(Math.max(...rows) <= 4)
+    assert.ok(Math.max(...rows) - Math.min(...rows) <= 1)
   }
 })
 test('explicit print grids survive paper, mode, and text-size changes', () => {

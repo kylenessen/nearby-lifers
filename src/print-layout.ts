@@ -14,32 +14,24 @@ export const GROUP_COLORS = [
   '#f2f2f2',
 ]
 
-// Keep full-width photos and complete rows together, up to the requested row limit.
+// Balance complete rows across the fewest pages so the last page is not sparse.
 export function packGrid(
-  items: { id: number; height: number }[],
+  ids: number[],
   columns: number,
   rows: number,
-  capacity: number,
-  gap: number,
 ): number[][] {
   const pages: number[][] = []
-  let page: number[] = []
-  let used = 0
-  let rowCount = 0
-  for (let index = 0; index < items.length; index += columns) {
-    const row = items.slice(index, index + columns)
-    const height = Math.max(...row.map((item) => item.height))
-    if (page.length && (rowCount === rows || used + gap + height > capacity)) {
-      pages.push(page)
-      page = []
-      used = 0
-      rowCount = 0
-    }
-    used += (rowCount ? gap : 0) + height
-    rowCount++
-    page.push(...row.map((item) => item.id))
+  const totalRows = Math.ceil(ids.length / columns)
+  const pageCount = Math.ceil(totalRows / rows)
+  if (!pageCount) return pages
+  const baseRows = Math.floor(totalRows / pageCount)
+  const extraRows = totalRows % pageCount
+  let index = 0
+  for (let page = 0; page < pageCount; page++) {
+    const count = (baseRows + (page < extraRows ? 1 : 0)) * columns
+    pages.push(ids.slice(index, index + count))
+    index += count
   }
-  if (page.length) pages.push(page)
   return pages
 }
 export function printGrid(view: View) {

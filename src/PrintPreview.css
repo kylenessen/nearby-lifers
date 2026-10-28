@@ -91,7 +91,9 @@
 .print-grid {
   display: grid;
   grid-template-columns: repeat(var(--print-columns), minmax(0, 1fr));
-  grid-auto-rows: max-content;
+  grid-auto-rows: calc(
+    (100% - (var(--print-rows) - 1) * 3mm) / var(--print-rows)
+  );
   align-content: start;
   gap: 3mm 2.5mm;
 }
@@ -106,9 +108,9 @@
 .print-photo {
   position: relative;
   width: 100%;
-  aspect-ratio: 1;
+  min-height: 8mm;
   align-self: center;
-  flex: 0 0 auto;
+  flex: 1 1 0;
   background: white;
 }
 .print-photo img {
@@ -135,6 +137,12 @@
   margin-top: 1.2mm;
   flex: 0 0 auto;
 }
+.print-card-info {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: var(--info-height, 0px);
+}
 .print-names strong,
 .print-names i {
   display: block;
@@ -158,7 +166,7 @@
   line-height: 1.1;
   font-weight: bold;
   padding: 0.6mm;
-  min-height: 4mm;
+  min-height: var(--group-height, 4mm);
   overflow-wrap: anywhere;
   flex: 0 0 auto;
   print-color-adjust: exact;

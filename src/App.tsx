@@ -911,8 +911,8 @@ export default function App() {
                           />
                         </div>
                         <p className="hint">
-                          Photos fill each column. Complete rows move to the
-                          next page when needed to fit the photos and text.
+                          Photos crop to fill the page without stretching. Rows
+                          are balanced across pages, up to your chosen limit.
                         </p>
                         <label className="checkbox print-credit-option">
                           <input
@@ -928,9 +928,9 @@ export default function App() {
                         </label>
                         {!gridFits && (
                           <div className="notice grid-warning" role="alert">
-                            Photos and text need more room on this paper. Add
-                            columns, use a smaller font or larger paper, or hide
-                            photo credits.
+                            Photos and text need more room on this paper. Choose
+                            fewer rows or columns, a smaller font or larger
+                            paper, or hide photo credits.
                           </div>
                         )}
                       </>

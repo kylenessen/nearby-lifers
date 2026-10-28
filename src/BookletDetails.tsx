@@ -117,7 +117,7 @@ export function BookletParameters({
     ],
     [
       'Format',
-      `${view.layout === 'grid' ? `${printGrid(view).columns} columns, up to ${printGrid(view).rows} rows. ${view.gridFontSize ?? 10} pt. Square photos, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : `Checklist. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}`}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
+      `${view.layout === 'grid' ? `${printGrid(view).columns} columns, up to ${printGrid(view).rows} rows. ${view.gridFontSize ?? 10} pt. Photos cropped to fill, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : `Checklist. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}`}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
     ],
   ]
   return (
