@@ -24,13 +24,17 @@ test('eight-page booklet puts covers outside and centers pages four and five', (
 test('any checklist length pads to whole sheets and retains every page once', () => {
   for (let contentPages = 0; contentPages <= 100; contentPages++) {
     const contentsPages = contentPages % 3
-    const plan = bookletPlan(contentPages, contentsPages)
+    const parametersPages = (contentPages % 4) + 1
+    const plan = bookletPlan(contentPages, contentsPages, parametersPages)
     const printed = plan.sides.flatMap((side) => side.pages)
     assert.equal(plan.totalPages % 4, 0)
     assert.equal(new Set(printed.map((p) => p.number)).size, plan.totalPages)
     assert.equal(printed.filter((p) => p.kind === 'cover').length, 1)
     assert.equal(printed.filter((p) => p.kind === 'back-cover').length, 1)
-    assert.equal(printed.filter((p) => p.kind === 'parameters').length, 1)
+    assert.equal(
+      printed.filter((p) => p.kind === 'parameters').length,
+      parametersPages,
+    )
     assert.equal(
       printed.filter((p) => p.kind === 'contents').length,
       contentsPages,
@@ -57,4 +61,18 @@ test('ungrouped booklets begin species on page three without contents', () => {
     plan.sides.flatMap((side) => side.pages).some((p) => p.kind === 'contents'),
     false,
   )
+})
+
+test('filter continuations precede contents and update the first guide page', () => {
+  const plan = bookletPlan(5, 2, 3)
+  const pages = plan.sides
+    .flatMap((side) => side.pages)
+    .sort((a, b) => a.number - b.number)
+  assert.deepEqual(pages.slice(1, 4), [
+    { number: 2, kind: 'parameters', parametersIndex: 0 },
+    { number: 3, kind: 'parameters', parametersIndex: 1 },
+    { number: 4, kind: 'parameters', parametersIndex: 2 },
+  ])
+  assert.equal(plan.contentStart, 7)
+  assert.equal(plan.sheets, 3)
 })

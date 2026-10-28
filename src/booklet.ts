@@ -1,6 +1,6 @@
 export type BookletPage = { number: number } & (
   | { kind: 'cover' }
-  | { kind: 'parameters' }
+  | { kind: 'parameters'; parametersIndex: number }
   | { kind: 'contents'; contentsIndex: number }
   | { kind: 'content'; contentIndex: number }
   | { kind: 'blank' }
@@ -11,21 +11,33 @@ export type BookletSide = {
   side: 'front' | 'back'
   pages: [BookletPage, BookletPage]
 }
-export function bookletPlan(contentPages: number, contentsPages = 0) {
+export function bookletPlan(
+  contentPages: number,
+  contentsPages = 0,
+  parametersPages = 1,
+) {
   if (
-    ![contentPages, contentsPages].every((n) => Number.isInteger(n) && n >= 0)
+    ![contentPages, contentsPages, parametersPages].every(
+      (n) => Number.isInteger(n) && n >= 0,
+    )
   )
     throw new Error('Booklet page count must be a nonnegative integer.')
-  const contentStart = 3 + contentsPages
-  const totalPages = Math.ceil((contentPages + contentsPages + 3) / 4) * 4
+  const contentStart = 2 + parametersPages + contentsPages
+  const totalPages =
+    Math.ceil((contentPages + contentsPages + parametersPages + 2) / 4) * 4
   const pages: BookletPage[] = Array.from(
     { length: totalPages },
     (_, index) => {
       const number = index + 1
       if (index === 0) return { number, kind: 'cover' }
-      if (index === 1) return { number, kind: 'parameters' }
+      if (index <= parametersPages)
+        return { number, kind: 'parameters', parametersIndex: index - 1 }
       if (number < contentStart)
-        return { number, kind: 'contents', contentsIndex: index - 2 }
+        return {
+          number,
+          kind: 'contents',
+          contentsIndex: index - parametersPages - 1,
+        }
       if (number < contentStart + contentPages)
         return { number, kind: 'content', contentIndex: number - contentStart }
       return { number, kind: index === totalPages - 1 ? 'back-cover' : 'blank' }

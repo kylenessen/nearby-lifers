@@ -49,10 +49,12 @@ export function BookletParameters({
   snapshot,
   view,
   count,
+  blockIndices,
 }: {
   snapshot: Snapshot
   view: View
   count: number
+  blockIndices?: number[]
 }) {
   const { search } = snapshot
   const searchUrl = `${PUBLIC_SITE_URL}?${encodeSettings({ search, view })}`
@@ -74,6 +76,14 @@ export function BookletParameters({
           ? `iNaturalist place ${area.id}`
           : `Polygon with ${area.points.length} corners. The exact boundary is saved in the search link.`
   const parameters = [
+    [
+      'Generated on',
+      new Date(snapshot.builtAt).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      }),
+    ],
     ['Username', snapshot.users.map((u) => `@${u.login}`).join(', ')],
     ['Area', `${snapshot.areaLabel}. ${areaDetails}`],
     [
@@ -117,40 +127,48 @@ export function BookletParameters({
     ],
     [
       'Format',
-      `${view.layout === 'grid' ? `${printGrid(view).columns} columns, up to ${printGrid(view).rows} rows. ${view.gridFontSize ?? 10} pt. Photos cropped to fill, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : `Checklist. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}`}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
+      `${view.layout === 'grid' ? `${printGrid(view).columns} columns, up to ${printGrid(view).rows} rows. ${view.gridFontSize ?? 9} pt. Photos cropped to fill, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : `Checklist. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}`}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
     ],
+  ]
+  const blocks = [
+    <PrintMap key="map" snapshot={snapshot} />,
+    ...parameters.map(([label, value]) => (
+      <dl className="booklet-parameters" key={label}>
+        <div>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      </dl>
+    )),
+    <div className="booklet-search-access" key="qr">
+      {searchQr ? (
+        <>
+          <QrImage
+            graphic={searchQr}
+            className="booklet-search-qr"
+            label="QR code to reopen this search"
+          />
+          <p className="booklet-search-caption">Reopen this search</p>
+        </>
+      ) : (
+        <p className="booklet-qr-unavailable">
+          This search is too long for one QR code. Save its link from the
+          website.
+        </p>
+      )}
+    </div>,
   ]
   return (
     <>
-      <h2 className="booklet-page-title">Booklet search filters</h2>
-      <div className="booklet-search-overview">
-        <PrintMap snapshot={snapshot} />
-        <div className="booklet-search-access">
-          <a className="booklet-search-link" href={searchUrl}>
-            {searchQr && (
-              <QrImage
-                graphic={searchQr}
-                className="booklet-search-qr"
-                label="QR code to reopen this exact search"
-              />
-            )}
-            Reopen this exact search
-          </a>
-          {!searchQr && (
-            <p className="booklet-qr-unavailable">
-              This search is too long for one QR code. Use the link in the PDF.
-            </p>
-          )}
+      {(blockIndices ?? blocks.map((_, index) => index)).map((index) => (
+        <div
+          className="booklet-parameter-block"
+          data-parameter-block={index}
+          key={index}
+        >
+          {blocks[index]}
         </div>
-      </div>
-      <dl className="booklet-parameters">
-        {parameters.map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      ))}
     </>
   )
 }

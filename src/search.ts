@@ -105,7 +105,7 @@ export function defaults(date = new Date()): Settings {
       density: 'comfortable',
       gridColumns: 3,
       gridRows: 4,
-      gridFontSize: 10,
+      gridFontSize: 9,
       sort: 'frequency',
       grouping: 'natural',
       printMode: 'sheets',
@@ -296,7 +296,7 @@ export function encodeSettings({ search, view }: Settings) {
   p.set('density', view.density)
   p.set('columns', String(view.gridColumns ?? 3))
   p.set('rows', String(view.gridRows ?? 4))
-  p.set('font_size', String(view.gridFontSize ?? 10))
+  p.set('font_size', String(view.gridFontSize ?? 9))
   p.set('sort', view.sort)
   p.set('grouping', view.grouping)
   p.set('print', view.printMode)

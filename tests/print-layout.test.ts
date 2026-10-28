@@ -17,13 +17,13 @@ test('every sheet and density defaults to three columns and four rows', () => {
       assert.deepEqual(printGrid(view), { columns: 3, rows: 4 })
     }
 })
-test('photo grids balance full rows across the fewest pages without losing species', () => {
+test('photo grids keep full pages and leave the final empty cells unfilled', () => {
   const ids = Array.from({ length: 37 }, (_, id) => id)
   const pages = packGrid(ids, 3, 4)
   assert.deepEqual(pages.flat(), ids)
   assert.deepEqual(
     pages.map((p) => p.length),
-    [12, 9, 9, 7],
+    [12, 12, 12, 1],
   )
   assert.deepEqual(packGrid([], 3, 4), [])
   assert.deepEqual(
@@ -35,10 +35,9 @@ test('photo grids balance full rows across the fewest pages without losing speci
     const packed = packGrid(species, 4, 4)
     assert.deepEqual(packed.flat(), species)
     assert.equal(packed.length, Math.ceil(count / 16))
-    assert.ok(packed.slice(0, -1).every((page) => page.length % 4 === 0))
+    assert.ok(packed.slice(0, -1).every((page) => page.length === 16))
     const rows = packed.map((page) => Math.ceil(page.length / 4))
     assert.ok(Math.max(...rows) <= 4)
-    assert.ok(Math.max(...rows) - Math.min(...rows) <= 1)
   }
 })
 test('explicit print grids survive paper, mode, and text-size changes', () => {

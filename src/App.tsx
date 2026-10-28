@@ -904,15 +904,15 @@ export default function App() {
                             label="Font size (pt)"
                             min={6}
                             max={24}
-                            value={view.gridFontSize ?? 10}
+                            value={view.gridFontSize ?? 9}
                             onChange={(value) =>
                               updateView({ gridFontSize: value })
                             }
                           />
                         </div>
                         <p className="hint">
-                          Photos crop to fill the page without stretching. Rows
-                          are balanced across pages, up to your chosen limit.
+                          Photos crop to fit your grid. Every page keeps the
+                          same photo size, with unused cells left empty.
                         </p>
                         <label className="checkbox print-credit-option">
                           <input

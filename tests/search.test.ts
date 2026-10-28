@@ -65,10 +65,10 @@ test('print grid dimensions validate independently and default to three by four'
   assert.equal(decodeSettings('?columns=8&rows=1').view.gridColumns, 8)
   assert.equal(decodeSettings('?columns=8&rows=1').view.gridRows, 1)
 })
-test('grid font size defaults to ten points and only accepts usable whole point sizes', () => {
+test('grid font size defaults to nine points and only accepts usable whole point sizes', () => {
   for (const value of ['', '0', '5', '25', '10.5', 'NaN'])
-    assert.equal(decodeSettings(`?font_size=${value}`).view.gridFontSize, 10)
-  for (const value of [6, 10, 14, 24])
+    assert.equal(decodeSettings(`?font_size=${value}`).view.gridFontSize, 9)
+  for (const value of [6, 9, 10, 14, 24])
     assert.equal(decodeSettings(`?font_size=${value}`).view.gridFontSize, value)
 })
 test('old bookmarks default to forty sheets and malformed limits cannot disable warnings', () => {

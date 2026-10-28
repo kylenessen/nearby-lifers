@@ -161,6 +161,8 @@ export function PrintPreview({
   const measure = useRef<HTMLDivElement>(null)
   const gridMeasure = useRef<HTMLDivElement>(null)
   const contentsMeasure = useRef<HTMLDivElement>(null)
+  const parametersMeasure = useRef<HTMLDivElement>(null)
+  const [parametersPages, setParametersPages] = useState<number[][]>([])
   const [packed, setPacked] = useState<ListColumn[]>([])
   const [contentsRows, setContentsRows] = useState<number[][]>([])
   const [gridMetrics, setGridMetrics] = useState<
@@ -213,7 +215,7 @@ export function PrintPreview({
     '--paper-height': `${paper.height}mm`,
     '--print-columns': columns,
     '--print-rows': rows,
-    '--grid-font': `${view.gridFontSize ?? 10}pt`,
+    '--grid-font': `${view.gridFontSize ?? 9}pt`,
     '--list-columns': listColumns,
     '--contents-columns': contentsColumns,
   } as CSSProperties
@@ -259,35 +261,29 @@ export function PrintPreview({
     const body = element.querySelector('.sheet-body')!
     const capacity = body.getBoundingClientRect().height - 1
     const gap = parseFloat(getComputedStyle(body).rowGap)
-    const measured = new Map(
-      cards.map((card) => [
-        Number(card.dataset.speciesId),
-        {
-          group:
+    // Measure the largest labels once so every frame has the same proportions,
+    // including pages with fewer than the requested number of rows.
+    const metrics = {
+      group: Math.max(
+        0,
+        ...cards.map(
+          (card) =>
             card.querySelector('.print-card-group')?.getBoundingClientRect()
               .height ?? 0,
-          info: card.querySelector('.print-card-info')!.getBoundingClientRect()
-            .height,
-        },
-      ]),
-    )
-    const aligned = new Map<number, { group: number; info: number }>()
-    let fits = true
-    for (const page of gridPages) {
-      const rowCount = Math.ceil(page.length / columns)
-      const height = (capacity - gap * (rowCount - 1)) / rowCount
-      for (let start = 0; start < page.length; start += columns) {
-        const ids = page.slice(start, start + columns)
-        const metrics = {
-          group: Math.max(...ids.map((id) => measured.get(id)!.group)),
-          info: Math.max(...ids.map((id) => measured.get(id)!.info)),
-        }
-        if (metrics.group + metrics.info + (8 * 96) / 25.4 > height)
-          fits = false
-        ids.forEach((id) => aligned.set(id, metrics))
-      }
+        ),
+      ),
+      info: Math.max(
+        0,
+        ...cards.map(
+          (card) =>
+            card.querySelector('.print-card-info')!.getBoundingClientRect()
+              .height,
+        ),
+      ),
     }
-    setGridMetrics(aligned)
+    const height = (capacity - gap * (rows - 1)) / rows
+    const fits = metrics.group + metrics.info + (8 * 96) / 25.4 <= height
+    setGridMetrics(new Map(orderedSpecies.map((s) => [s.id, metrics])))
     onGridFitsChange?.(fits)
   }, [
     orderedSpecies,
@@ -330,6 +326,26 @@ export function PrintPreview({
     view.bookletTitle,
   ])
 
+  useLayoutEffect(() => {
+    const element = parametersMeasure.current
+    if (!element || !booklet) return
+    const body = element.querySelector('.sheet-body')!
+    const gap = parseFloat(getComputedStyle(body).rowGap)
+    const capacity = body.getBoundingClientRect().height - 2
+    const blocks = Array.from(
+      element.querySelectorAll<HTMLElement>('.booklet-parameter-block'),
+    ).map((block) => ({
+      id: Number(block.dataset.parameterBlock),
+      group: 'parameters',
+      height: block.getBoundingClientRect().height + gap,
+    }))
+    setParametersPages(
+      packList(blocks, capacity + gap, 0).map((column) =>
+        column.flatMap((g) => g.ids),
+      ),
+    )
+  }, [booklet, snapshot, view, species.length])
+
   const pages = gridPages.map((ids) =>
     ids.map((id) => byId.get(id)).filter((s): s is Species => Boolean(s)),
   )
@@ -340,7 +356,11 @@ export function PrintPreview({
   const contentsPages: number[][][] = []
   for (let i = 0; i < contentsRows.length; i += contentsColumns)
     contentsPages.push(contentsRows.slice(i, i + contentsColumns))
-  const plan = bookletPlan(pageCount, grouped ? contentsPages.length : 0)
+  const plan = bookletPlan(
+    pageCount,
+    grouped ? contentsPages.length : 0,
+    Math.max(1, parametersPages.length),
+  )
   useLayoutEffect(() => {
     onBookletSheetsChange?.(booklet ? plan.sheets : 0)
   }, [onBookletSheetsChange, booklet, plan.sheets])
@@ -365,7 +385,7 @@ export function PrintPreview({
   }
   const date = new Date(snapshot.builtAt).toLocaleDateString(undefined, {
     year: 'numeric',
-    month: 'short',
+    month: 'long',
     day: 'numeric',
   })
   const footer = (number: number) => (
@@ -403,14 +423,7 @@ export function PrintPreview({
             key={index}
           >
             {header}
-            <div
-              className="sheet-body print-grid"
-              style={
-                {
-                  '--print-rows': Math.ceil(page.length / columns),
-                } as CSSProperties
-              }
-            >
+            <div className="sheet-body print-grid">
               {page.map((s) => card(s))}
             </div>
             {footer(booklet ? plan.contentStart + index : index + 1)}
@@ -462,7 +475,7 @@ export function PrintPreview({
             : `${paper.label} · ${paper.dimensions} · ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}`}{' '}
           ·{' '}
           {view.layout === 'grid'
-            ? `${columns} columns · Up to ${rows} rows per page · ${view.gridFontSize ?? 10} pt · Photos cropped to fill the page`
+            ? `${columns} columns · Up to ${rows} rows per page · ${view.gridFontSize ?? 9} pt · Photos cropped to fill the page`
             : 'Grouped checklist'}
         </p>
       )}
@@ -474,6 +487,25 @@ export function PrintPreview({
               {orderedSpecies.map((s) => card(s, true))}
             </div>
             {footer(booklet ? plan.contentStart : 1)}
+          </div>
+        </div>
+      )}
+      {booklet && (
+        <div
+          className="print-measure"
+          ref={parametersMeasure}
+          aria-hidden="true"
+        >
+          <div className="print-sheet booklet-parameters-page">
+            <h2 className="booklet-page-title">Booklet search filters</h2>
+            <div className="sheet-body booklet-parameter-blocks">
+              <BookletParameters
+                snapshot={snapshot}
+                view={view}
+                count={species.length}
+              />
+            </div>
+            {footer(2)}
           </div>
         </div>
       )}
@@ -551,11 +583,19 @@ export function PrintPreview({
                         contentPages[page.contentIndex]
                       ) : page.kind === 'parameters' ? (
                         <article className="print-sheet booklet-parameters-page">
-                          <BookletParameters
-                            snapshot={snapshot}
-                            view={view}
-                            count={species.length}
-                          />
+                          <h2 className="booklet-page-title">
+                            Booklet search filters
+                          </h2>
+                          <div className="sheet-body booklet-parameter-blocks">
+                            <BookletParameters
+                              snapshot={snapshot}
+                              view={view}
+                              count={species.length}
+                              blockIndices={
+                                parametersPages[page.parametersIndex] ?? []
+                              }
+                            />
+                          </div>
                           {footer(page.number)}
                         </article>
                       ) : page.kind === 'contents' ? (
@@ -594,21 +634,23 @@ export function PrintPreview({
                             <>
                               <p className="booklet-owner">
                                 {snapshot.users
-                                  .map((user) => `@${user.login}`)
+                                  .map((user) => '@' + user.login)
                                   .join(', ')}
+                                ’s
                               </p>
-                              <h1>
-                                {view.bookletTitle.trim() || 'Nearby Lifers'}
-                              </h1>
+                              <p className="booklet-tool-name">
+                                Nearby Lifers
+                                {view.bookletTitle.trim() &&
+                                view.bookletTitle.trim() !== 'Nearby Lifers'
+                                  ? ' for'
+                                  : ''}
+                              </p>
                               {view.bookletTitle.trim() &&
                                 view.bookletTitle.trim() !==
                                   'Nearby Lifers' && (
-                                  <p className="booklet-tool-name">
-                                    Nearby Lifers
-                                  </p>
+                                  <h1>{view.bookletTitle.trim()}</h1>
                                 )}
-                              <p>{snapshot.areaLabel}</p>
-                              <p className="booklet-date">Generated {date}</p>
+                              <p className="booklet-date">{date}</p>
                             </>
                           ) : page.kind === 'back-cover' ? (
                             <BookletBack />
@@ -638,8 +680,19 @@ export function PrintPreview({
                           d={`M1 ${center - 6.35}v12.7`}
                           strokeDasharray="0.8 0.7"
                         />
-                        <path
-                          d={`M0.5 ${center - 6.35}h1M0.5 ${center + 6.35}h1`}
+                        <circle
+                          cx="1"
+                          cy={center - 6.35}
+                          r="0.3"
+                          fill="#555"
+                          stroke="none"
+                        />
+                        <circle
+                          cx="1"
+                          cy={center + 6.35}
+                          r="0.3"
+                          fill="#555"
+                          stroke="none"
                         />
                       </g>
                     ))}
