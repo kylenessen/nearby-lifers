@@ -542,6 +542,12 @@ fieldset legend {
   margin-top: 7px;
   font-size: 13px;
 }
+.grid-dimensions {
+  margin-top: 18px;
+}
+.grid-dimensions input {
+  margin-top: 7px;
+}
 .site-footer {
   margin-top: 50px;
   padding: 24px 0 30px;

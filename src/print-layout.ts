@@ -14,28 +14,27 @@ export const GROUP_COLORS = [
   '#f2f2f2',
 ]
 
-// Keep whole grid rows together. Group boundaries never create empty cells.
+// Fixed cells fill the page. Group boundaries never create empty cells.
 export function packGrid(
-  items: { id: number; height: number }[],
+  ids: number[],
   columns: number,
-  capacity: number,
+  rows: number,
 ): number[][] {
   const pages: number[][] = []
-  let page: number[] = [],
-    used = 0
-  for (let index = 0; index < items.length; index += columns) {
-    const row = items.slice(index, index + columns)
-    const height = Math.max(...row.map((item) => item.height))
-    if (page.length && used + height > capacity) {
-      pages.push(page)
-      page = []
-      used = 0
-    }
-    page.push(...row.map((item) => item.id))
-    used += height
-  }
-  if (page.length) pages.push(page)
+  const capacity = columns * rows
+  for (let index = 0; index < ids.length; index += capacity)
+    pages.push(ids.slice(index, index + capacity))
   return pages
+}
+export function printGrid(view: View) {
+  const preset = gridShape(
+    view.printMode === 'booklet' ? 'half' : view.paper,
+    view.density,
+  )
+  return {
+    columns: view.gridColumns ?? preset.columns,
+    rows: view.gridRows ?? preset.rows,
+  }
 }
 export function gridShape(paper: Paper, density: View['density']) {
   const shapes = {

@@ -47,9 +47,21 @@ test('every area and every view option round trips through a portable link', () 
       bookletTitle: 'Ducks & geese near Morro Bay',
       showPhotoCredits: true,
       bookletSheetLimit: 23,
+      gridColumns: 3,
+      gridRows: 5,
     })
     assert.deepEqual(decodeSettings(encodeSettings(settings)), settings)
   }
+})
+test('print grid dimensions validate independently and old links keep their presets', () => {
+  assert.equal(decodeSettings('?density=compact').view.gridRows, null)
+  for (const value of ['', '0', '-1', '1.5', 'no', '9']) {
+    const { view } = decodeSettings(`?columns=${value}&rows=4`)
+    assert.equal(view.gridColumns, null)
+    assert.equal(view.gridRows, 4)
+  }
+  assert.equal(decodeSettings('?columns=8&rows=1').view.gridColumns, 8)
+  assert.equal(decodeSettings('?columns=8&rows=1').view.gridRows, 1)
 })
 test('old bookmarks default to forty sheets and malformed limits cannot disable warnings', () => {
   for (const query of [

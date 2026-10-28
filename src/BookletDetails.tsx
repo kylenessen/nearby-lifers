@@ -3,6 +3,7 @@ import type { View } from './search'
 import type { Snapshot } from './inaturalist'
 import { PUBLIC_SITE_URL, qrGraphic } from './qr'
 import { PrintMap } from './PrintMap'
+import { printGrid } from './print-layout'
 
 const websiteQr = qrGraphic(PUBLIC_SITE_URL)
 export function BookletBack() {
@@ -89,7 +90,7 @@ export function BookletParameters({
     ],
     [
       'Format',
-      `${view.layout === 'grid' ? `Square photos, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : 'Checklist'}. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
+      `${view.layout === 'grid' ? `${printGrid(view).columns} columns × ${printGrid(view).rows} rows, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : 'Checklist'}. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
     ],
   ]
   return (

@@ -6,7 +6,7 @@ import { bookletPlan } from './booklet'
 import { BookletBack, BookletParameters } from './BookletDetails'
 import type { View } from './search'
 import type { Snapshot, Species } from './inaturalist'
-import { GROUP_COLORS, gridShape, packGrid, packList } from './print-layout'
+import { GROUP_COLORS, printGrid, packGrid, packList } from './print-layout'
 import type { ListColumn } from './print-layout'
 import './PrintPreview.css'
 
@@ -16,6 +16,7 @@ type Props = {
   view: View
   visible: boolean
   onBookletSheetsChange?: (sheets: number) => void
+  onGridFitsChange?: (fits: boolean) => void
 }
 function Header({
   snapshot,
@@ -134,11 +135,12 @@ export function PrintPreview({
   view,
   visible,
   onBookletSheetsChange,
+  onGridFitsChange,
 }: Props) {
   const booklet = view.printMode === 'booklet'
   const paperKey = booklet ? 'half' : view.paper
   const paper = PAPERS[paperKey]
-  const { columns } = gridShape(paperKey, view.density)
+  const { columns, rows } = printGrid(view)
   const listColumns =
     paperKey === 'letter'
       ? ['compact', 'dense'].includes(view.density)
@@ -153,10 +155,6 @@ export function PrintPreview({
   const contentsMeasure = useRef<HTMLDivElement>(null)
   const [packed, setPacked] = useState<ListColumn[]>([])
   const [contentsRows, setContentsRows] = useState<number[][]>([])
-  const [gridLayout, setGridLayout] = useState<{
-    pages: number[][]
-    photoSize: number
-  }>({ pages: [], photoSize: 100000 })
   const groups = useMemo(
     () => groupSpecies(species, { sort: view.sort, grouping: view.grouping }),
     [species, view.grouping, view.sort],
@@ -194,7 +192,7 @@ export function PrintPreview({
     '--paper-width': `${paper.width}mm`,
     '--paper-height': `${paper.height}mm`,
     '--print-columns': columns,
-    '--photo-size': `${gridLayout.photoSize}px`,
+    '--print-rows': rows,
     '--list-columns': listColumns,
     '--contents-columns': contentsColumns,
   } as CSSProperties
@@ -234,33 +232,24 @@ export function PrintPreview({
   useLayoutEffect(() => {
     const element = gridMeasure.current
     if (!element || view.layout !== 'grid') return
-    element.style.setProperty('--photo-size', '100000px')
-    const capacity =
-      element.querySelector('.sheet-body')!.getBoundingClientRect().height - 2
     const cards = Array.from(
       element.querySelectorAll<HTMLElement>('.print-card'),
     )
-    // Very small paper can need a narrower square to fit even a single row.
-    let photoSize = 100000
-    for (const card of cards) {
-      const photo = card.querySelector('.print-photo')!.getBoundingClientRect()
-      const height = card.getBoundingClientRect().height
-      if (height > capacity)
-        photoSize = Math.min(
-          photoSize,
-          Math.max(8, photo.height - height + capacity - 1),
-        )
-    }
-    element.style.setProperty('--photo-size', `${photoSize}px`)
-    const items = cards.map((card) => ({
-      id: Number(card.dataset.speciesId),
-      height: card.getBoundingClientRect().height,
-    }))
-    setGridLayout({ pages: packGrid(items, columns, capacity), photoSize })
+    onGridFitsChange?.(
+      cards.every(
+        (card) =>
+          card.scrollHeight <= card.clientHeight + 1 &&
+          card.querySelector('.print-records')!.getBoundingClientRect().left >
+            card.querySelector('.paper-checkbox')!.getBoundingClientRect()
+              .right,
+      ),
+    )
   }, [
     orderedSpecies,
     groups,
     columns,
+    rows,
+    onGridFitsChange,
     paperKey,
     booklet,
     view.layout,
@@ -294,7 +283,11 @@ export function PrintPreview({
     view.bookletTitle,
   ])
 
-  const pages = gridLayout.pages.map((ids) =>
+  const pages = packGrid(
+    orderedSpecies.map((s) => s.id),
+    columns,
+    rows,
+  ).map((ids) =>
     ids.map((id) => byId.get(id)).filter((s): s is Species => Boolean(s)),
   )
   const listPages: ListColumn[][] = []
@@ -416,7 +409,7 @@ export function PrintPreview({
             : `${paper.label} · ${paper.dimensions} · ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}`}{' '}
           ·{' '}
           {view.layout === 'grid'
-            ? `${columns} columns · Square photos`
+            ? `${columns} columns × ${rows} rows · Photos fit without cropping`
             : 'Grouped checklist'}
         </p>
       )}

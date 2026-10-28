@@ -14,6 +14,7 @@ import './App.css'
 import { LocationMap } from './LocationMap'
 import { UsernameField } from './UsernameField'
 import { PrintPreview } from './PrintPreview'
+import { printGrid } from './print-layout'
 import { groupSpecies } from './presentation'
 import {
   areaLabel,
@@ -53,10 +54,16 @@ function writeUrl(settings: Settings, push = false) {
     return
   window.history[push ? 'pushState' : 'replaceState'](null, '', url)
 }
-function SheetLimitField({
+function NumberField({
+  label,
+  max,
+  className,
   value,
   onChange,
 }: {
+  label: string
+  max: number
+  className?: string
   value: number
   onChange: (value: number) => void
 }) {
@@ -65,19 +72,19 @@ function SheetLimitField({
     setDraft(String(value))
   }, [value])
   return (
-    <label className="sheet-limit-label">
-      Warn above this many sheets
+    <label className={className}>
+      {label}
       <input
         type="number"
         min="1"
-        max="1000"
+        max={max}
         step="1"
         value={draft}
         onChange={(event) => {
           const text = event.target.value
           setDraft(text)
           const number = Number(text)
-          if (text && Number.isInteger(number) && number >= 1 && number <= 1000)
+          if (text && Number.isInteger(number) && number >= 1 && number <= max)
             onChange(number)
         }}
         onBlur={() => setDraft(String(value))}
@@ -113,6 +120,7 @@ export default function App() {
   const [copyMessage, setCopyMessage] = useState('')
   const [printing, setPrinting] = useState(false)
   const [bookletSheets, setBookletSheets] = useState(0)
+  const [gridFits, setGridFits] = useState(true)
   const [printMessage, setPrintMessage] = useState('')
   const requestRef = useRef<AbortController | null>(null)
   const initialUrlWritten = useRef(false)
@@ -805,11 +813,19 @@ export default function App() {
                     </select>
                   </label>
                   <label>
-                    Density
+                    {preview && view.layout === 'grid'
+                      ? 'Photo grid text size'
+                      : 'Density'}
                     <select
                       value={view.density}
                       onChange={(e) =>
                         updateView({
+                          ...(preview && view.layout === 'grid'
+                            ? {
+                                gridColumns: printGrid(view).columns,
+                                gridRows: printGrid(view).rows,
+                              }
+                            : {}),
                           density: e.target.value as View['density'],
                         })
                       }
@@ -865,18 +881,49 @@ export default function App() {
                       </label>
                     </div>
                     {view.layout === 'grid' && (
-                      <label className="checkbox print-credit-option">
-                        <input
-                          type="checkbox"
-                          checked={view.showPhotoCredits}
-                          onChange={(event) =>
-                            updateView({
-                              showPhotoCredits: event.target.checked,
-                            })
-                          }
-                        />
-                        Show photo credits
-                      </label>
+                      <>
+                        <div className="print-options grid-dimensions">
+                          <NumberField
+                            label="Columns per page"
+                            max={8}
+                            value={printGrid(view).columns}
+                            onChange={(value) =>
+                              updateView({ gridColumns: value })
+                            }
+                          />
+                          <NumberField
+                            label="Rows per page"
+                            max={8}
+                            value={printGrid(view).rows}
+                            onChange={(value) =>
+                              updateView({ gridRows: value })
+                            }
+                          />
+                        </div>
+                        <p className="hint">
+                          Cells fill the page. Photos keep their proportions,
+                          with white space where needed.
+                        </p>
+                        <label className="checkbox print-credit-option">
+                          <input
+                            type="checkbox"
+                            checked={view.showPhotoCredits}
+                            onChange={(event) =>
+                              updateView({
+                                showPhotoCredits: event.target.checked,
+                              })
+                            }
+                          />
+                          Show photo credits
+                        </label>
+                        {!gridFits && (
+                          <div className="notice grid-warning" role="alert">
+                            This grid leaves too little room for names and
+                            photos. Choose fewer rows or columns, smaller text,
+                            or hide photo credits.
+                          </div>
+                        )}
+                      </>
                     )}
                     {view.printMode === 'booklet' ? (
                       <>
@@ -891,7 +938,10 @@ export default function App() {
                             }
                           />
                         </label>
-                        <SheetLimitField
+                        <NumberField
+                          label="Warn above this many sheets"
+                          className="sheet-limit-label"
+                          max={1000}
                           value={view.bookletSheetLimit}
                           onChange={(value) =>
                             updateView({ bookletSheetLimit: value })
@@ -920,7 +970,8 @@ export default function App() {
                           Stack the sheets in order, fold to 5.5 × 8.5 inches,
                           and use the three staple guides along the fold. Each
                           half-inch guide has two hole marks. Their centers are
-                          1.5 inches from either end and at the midpoint.
+                          1.5 inches from either end and at the midpoint. Pages
+                          include an extra 5 mm of margin at the spine.
                         </p>
                       </>
                     ) : (
@@ -934,7 +985,12 @@ export default function App() {
                       type="button"
                       className="primary"
                       onClick={print}
-                      disabled={printing || pending || !visible.length}
+                      disabled={
+                        printing ||
+                        pending ||
+                        !visible.length ||
+                        (view.layout === 'grid' && !gridFits)
+                      }
                     >
                       {printing ? (
                         <LoaderCircle size={16} className="spin" />
@@ -1095,6 +1151,7 @@ export default function App() {
       {snapshot && (
         <PrintPreview
           onBookletSheetsChange={setBookletSheets}
+          onGridFitsChange={setGridFits}
           snapshot={snapshot}
           species={visible}
           view={view}

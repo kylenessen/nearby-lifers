@@ -69,6 +69,8 @@ export type View = {
   layout: 'grid' | 'list'
   paper: Paper
   density: 'comfortable' | 'compact' | 'large' | 'dense'
+  gridColumns: number | null
+  gridRows: number | null
   sort: 'common' | 'scientific' | 'frequency'
   grouping: 'natural' | 'family' | 'order' | 'none'
   printMode: 'sheets' | 'booklet'
@@ -100,6 +102,8 @@ export function defaults(date = new Date()): Settings {
       layout: 'grid',
       paper: 'letter',
       density: 'comfortable',
+      gridColumns: null,
+      gridRows: null,
       sort: 'frequency',
       grouping: 'natural',
       printMode: 'sheets',
@@ -288,6 +292,8 @@ export function encodeSettings({ search, view }: Settings) {
   p.set('layout', view.layout)
   p.set('paper', view.paper)
   p.set('density', view.density)
+  if (view.gridColumns !== null) p.set('columns', String(view.gridColumns))
+  if (view.gridRows !== null) p.set('rows', String(view.gridRows))
   p.set('sort', view.sort)
   p.set('grouping', view.grouping)
   p.set('print', view.printMode)
@@ -351,6 +357,13 @@ export function decodeSettings(query: string, date = new Date()): Settings {
   if (paper && Object.hasOwn(PAPERS, paper)) view.paper = paper as Paper
   if (['compact', 'large', 'dense'].includes(p.get('density') ?? ''))
     view.density = p.get('density') as View['density']
+  for (const [parameter, key] of [
+    ['columns', 'gridColumns'],
+    ['rows', 'gridRows'],
+  ] as const) {
+    const value = Number(p.get(parameter))
+    if (Number.isInteger(value) && value >= 1 && value <= 8) view[key] = value
+  }
   if (['common', 'scientific', 'frequency'].includes(p.get('sort') ?? ''))
     view.sort = p.get('sort') as View['sort']
   if (['natural', 'family', 'order', 'none'].includes(p.get('grouping') ?? ''))
