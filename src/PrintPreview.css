@@ -1,0 +1,275 @@
+.print-output {
+  --print-font: 9pt;
+  --print-small: 7pt;
+  color: #111;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.print-output:not(.preview-visible) {
+  position: absolute;
+  left: -20000px;
+  top: 0;
+}
+.print-output.preview-visible {
+  overflow-x: auto;
+  background: #e1e4db;
+  padding: 25px 20px 45px;
+}
+.preview-caption {
+  text-align: center;
+  margin: 0 0 18px;
+  color: #536152;
+  font-size: 12px;
+}
+.sheet-stack {
+  width: var(--paper-width);
+  margin: auto;
+}
+.print-sheet {
+  width: var(--paper-width);
+  height: var(--paper-height);
+  padding: 9mm;
+  display: flex;
+  flex-direction: column;
+  gap: 3mm;
+  background: white;
+  color: #111;
+  box-shadow: 0 3px 18px #27372720;
+  margin: 0 auto 25px;
+}
+.sheet-header {
+  flex: 0 0 auto;
+  padding-bottom: 2.5mm;
+  border-bottom: 0.3mm solid #333;
+}
+.sheet-header > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1mm 3mm;
+}
+.sheet-header strong {
+  font-family: Georgia, serif;
+  font-size: 19pt;
+  font-weight: normal;
+  letter-spacing: -0.5pt;
+}
+.sheet-header span {
+  font-size: 7pt;
+}
+.sheet-header p {
+  margin: 1.1mm 0 0;
+  font-size: 7pt;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.sheet-body {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.sheet-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 3mm;
+  font-size: 6pt;
+  line-height: 1.2;
+  border-top: 0.2mm solid #aaa;
+  padding-top: 2mm;
+  flex: 0 0 auto;
+}
+.print-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--print-columns), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--print-rows), minmax(0, 1fr));
+  gap: 2mm;
+}
+.print-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1mm;
+  padding: 2mm;
+  border: 0.2mm solid #92998f;
+  min-width: 0;
+  min-height: 0;
+  break-inside: avoid;
+}
+.print-photo {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 0;
+  background: #f1f2ed;
+}
+.print-photo img {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+  object-fit: contain;
+}
+.paper-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.25mm solid #222;
+  width: 3.3mm;
+  height: 3.3mm;
+  font-size: 8pt;
+  line-height: 1;
+  background: white;
+  flex-shrink: 0;
+}
+.print-photo .paper-checkbox {
+  position: absolute;
+  top: 1mm;
+  left: 1mm;
+}
+.print-names {
+  flex: 0 0 auto;
+}
+.print-names strong,
+.print-names i {
+  display: block;
+  font-size: var(--print-font);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.print-names i {
+  font-size: var(--print-small);
+  margin-top: 0.7mm;
+}
+.print-credit {
+  font-size: 5pt;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  flex: 0 0 auto;
+  color: #444;
+}
+.density-compact {
+  --print-font: 8pt;
+  --print-small: 6.5pt;
+}
+.density-large {
+  --print-font: 11pt;
+  --print-small: 9pt;
+}
+.paper-a6 .sheet-header strong {
+  font-size: 16pt;
+}
+.paper-a6 .sheet-header span,
+.paper-a6 .sheet-header p {
+  font-size: 6pt;
+}
+.paper-a6 .print-card,
+.density-compact .print-card {
+  padding: 1.5mm;
+}
+.paper-a6.density-compact {
+  --print-font: 7.5pt;
+  --print-small: 6pt;
+}
+.print-measure {
+  position: absolute;
+  left: -40000px;
+  top: 0;
+  visibility: hidden;
+}
+.print-measure .print-sheet {
+  margin: 0;
+}
+.measure-column {
+  width: calc(
+    (var(--paper-width) - 18mm - (var(--list-columns) - 1) * 5mm) /
+      var(--list-columns)
+  );
+}
+.print-list-columns {
+  display: grid;
+  grid-template-columns: repeat(var(--list-columns), minmax(0, 1fr));
+  gap: 5mm;
+}
+.print-list-column {
+  min-width: 0;
+}
+.print-group-heading {
+  font-size: calc(var(--print-font) + 1pt);
+  line-height: 1.2;
+  margin: 0;
+  padding: 2mm 0 1mm;
+  border-bottom: 0.2mm solid #666;
+  font-weight: bold;
+}
+.print-list-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 2mm;
+  padding: 1.5mm 0;
+  border-bottom: 0.15mm solid #ddd;
+  break-inside: avoid;
+}
+.print-list-row .paper-checkbox {
+  margin-top: 0.3mm;
+}
+.print-list-row > div {
+  min-width: 0;
+}
+.print-list-row strong {
+  display: block;
+  font-size: var(--print-font);
+  font-weight: normal;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.print-list-row i {
+  display: block;
+  margin-top: 0.4mm;
+  font-size: var(--print-small);
+  line-height: 1.2;
+  color: #444;
+  overflow-wrap: anywhere;
+}
+.density-compact .print-list-row {
+  padding: 1mm 0;
+}
+@media print {
+  html,
+  body,
+  #root {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-width: 0;
+    background: white;
+  }
+  .screen-only,
+  .print-measure {
+    display: none !important;
+  }
+  .print-output,
+  .print-output:not(.preview-visible),
+  .print-output.preview-visible {
+    display: block;
+    position: static;
+    width: auto;
+    padding: 0;
+    background: white;
+    overflow: visible;
+  }
+  .sheet-stack {
+    margin: 0;
+  }
+  .print-sheet {
+    margin: 0;
+    box-shadow: none;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+  }
+  .print-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  .print-photo,
+  .paper-checkbox {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
