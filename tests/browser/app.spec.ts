@@ -361,6 +361,13 @@ for (const layout of ['grid', 'list'] as const) {
                   .height < 10
               )
                 errors.push('photo too small')
+              if (format === 'grid') {
+                const photo = item
+                  .querySelector('.print-photo')!
+                  .getBoundingClientRect()
+                if (Math.abs(photo.width - photo.height) > 1)
+                  errors.push('photo is not square')
+              }
             }
           }
           return errors
@@ -572,6 +579,19 @@ for (const layout of ['grid', 'list'] as const) {
       ),
     )
     expect(overflow).toBe(false)
+    await expect(
+      stack.locator('[data-page-kind="content"] .sheet-header'),
+    ).toHaveCount(0)
+    for (const slot of await stack
+      .locator('[data-page-kind="content"]')
+      .all()) {
+      await expect(slot.locator('.sheet-footer span').first()).toHaveText(
+        'Morro Bay birds & other discoveries',
+      )
+      await expect(slot.locator('.sheet-footer span').last()).toHaveText(
+        (await slot.getAttribute('data-page-number'))!,
+      )
+    }
     await expect(stack.locator('.booklet-cover h1')).toHaveText(
       'Morro Bay birds & other discoveries',
     )
@@ -653,9 +673,19 @@ for (const layout of ['grid', 'list'] as const) {
           expect(closedGroups.has(cards[i].group!)).toBe(false)
         }
       }
-      expect(gridPages.slice(0, -1).every((p) => p.cards.length === 15)).toBe(
-        true,
-      )
+      const gridColumns = await stack
+        .locator('.print-grid')
+        .first()
+        .evaluate(
+          (el) => getComputedStyle(el).gridTemplateColumns.split(' ').length,
+        )
+      expect(
+        gridPages
+          .slice(0, -1)
+          .every(
+            (p) => p.cards.length > 0 && p.cards.length % gridColumns === 0,
+          ),
+      ).toBe(true)
     }
     expect(new URL(page.url()).searchParams.get('print')).toBe('booklet')
     expect(new URL(page.url()).searchParams.get('title')).toBe(
@@ -864,4 +894,122 @@ test('long contents paginate without losing groups or shifting their references'
       )
     expect(entry.page).toBe(Math.min(...slots))
   }
+})
+
+test('booklet photo controls preserve square frames, group colors, and physical-sheet warnings', async ({
+  page,
+}) => {
+  const requests = await mockApi(page)
+  const settings = defaults()
+  settings.view.printMode = 'booklet'
+  settings.view.density = 'dense'
+  await page.goto(`/?${encodeSettings(settings)}`)
+  await page.getByRole('button', { name: 'Print options', exact: true }).click()
+  const stack = page.locator('.booklet-stack')
+  const credits = page.getByRole('checkbox', {
+    name: 'Show photo credits',
+    exact: true,
+  })
+  const limit = page.getByRole('spinbutton', {
+    name: 'Warn above this many sheets',
+  })
+  await expect(credits).not.toBeChecked()
+  await expect(limit).toHaveValue('40')
+  await expect(stack.locator('.print-credit')).toHaveCount(0)
+  const searchRequests = requests.filter((r) =>
+    r.pathname.includes('/observations'),
+  ).length
+  for (const density of ['dense', 'compact', 'comfortable', 'large']) {
+    await page
+      .getByRole('combobox', { name: 'Density', exact: true })
+      .selectOption(density)
+    for (const showCredits of [false, true]) {
+      await credits.setChecked(showCredits)
+      await expect(stack.locator('.print-credit')).toHaveCount(
+        showCredits ? 42 : 0,
+      )
+      const errors = await stack.evaluate((root) => {
+        const errors: string[] = []
+        const colors = new Map<string, string>()
+        for (const card of root.querySelectorAll<HTMLElement>('.print-card')) {
+          const photo = card
+            .querySelector('.print-photo')!
+            .getBoundingClientRect()
+          if (Math.abs(photo.width - photo.height) > 1)
+            errors.push('non-square photo')
+          const body = card.closest('.sheet-body')!.getBoundingClientRect()
+          if (
+            card.getBoundingClientRect().bottom > body.bottom + 1 ||
+            card.scrollHeight > card.clientHeight + 1
+          )
+            errors.push('overflow')
+          const badge = card
+            .querySelector('.print-records')!
+            .getBoundingClientRect()
+          const checkbox = card
+            .querySelector('.paper-checkbox')!
+            .getBoundingClientRect()
+          if (
+            Math.abs(badge.top - checkbox.top) > 1 ||
+            badge.left <= checkbox.right ||
+            badge.right > photo.right
+          )
+            errors.push('bad badge placement')
+          const color = getComputedStyle(
+            card.querySelector('.print-card-group')!,
+          ).backgroundColor
+          const group = card.dataset.group!
+          if (colors.has(group) && colors.get(group) !== color)
+            errors.push('group color changed across pages')
+          if (color === 'rgba(0, 0, 0, 0)') errors.push('missing group color')
+          colors.set(group, color)
+        }
+        if (new Set(colors.values()).size !== colors.size)
+          errors.push('neighboring fixture groups share colors')
+        return errors
+      })
+      expect(errors, `${density}, credits ${showCredits}`).toEqual([])
+    }
+  }
+  const sheets = (await stack.locator('.booklet-side').count()) / 2
+  await limit.fill(String(sheets))
+  await expect(page.locator('.sheet-warning')).toHaveCount(0)
+  await limit.fill(String(sheets - 1))
+  await expect(page.locator('.sheet-warning')).toContainText(
+    `uses ${sheets} physical sheets`,
+  )
+  await expect(
+    page.getByRole('button', { name: 'Print or save PDF' }),
+  ).toBeEnabled()
+  await page
+    .getByRole('button', { name: 'Taxon checklist', exact: true })
+    .click()
+  const listSheets = (await stack.locator('.booklet-side').count()) / 2
+  expect(listSheets).toBeLessThan(sheets)
+  await expect(page.locator('.sheet-warning')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Photo grid', exact: true }).click()
+  await expect(page.locator('.sheet-warning')).toContainText(
+    `uses ${sheets} physical sheets`,
+  )
+  expect(
+    requests.filter((r) => r.pathname.includes('/observations')).length,
+  ).toBe(searchRequests)
+  expect(new URL(page.url()).searchParams.get('credits')).toBe('1')
+  expect(new URL(page.url()).searchParams.get('sheet_limit')).toBe(
+    String(sheets - 1),
+  )
+  await page.reload()
+  await page.getByRole('button', { name: 'Print options', exact: true }).click()
+  await expect(credits).toBeChecked()
+  await expect(limit).toHaveValue(String(sheets - 1))
+  await expect(page.locator('.sheet-warning')).toContainText(
+    `uses ${sheets} physical sheets`,
+  )
+  await credits.uncheck()
+  await page
+    .getByRole('combobox', { name: 'Density', exact: true })
+    .selectOption('dense')
+  await stack
+    .locator('[data-content-index="0"]')
+    .screenshot({ path: 'test-results/booklet-square-photos.png' })
 })

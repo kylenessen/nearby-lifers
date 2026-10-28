@@ -1,4 +1,42 @@
 import type { Paper, View } from './search.ts'
+
+// ColorBrewer Pastel1, as published by d3-scale-chromatic.
+// https://d3js.org/d3-scale-chromatic/categorical#schemePastel1
+export const GROUP_COLORS = [
+  '#fbb4ae',
+  '#b3cde3',
+  '#ccebc5',
+  '#decbe4',
+  '#fed9a6',
+  '#ffffcc',
+  '#e5d8bd',
+  '#fddaec',
+  '#f2f2f2',
+]
+
+// Keep whole grid rows together. Group boundaries never create empty cells.
+export function packGrid(
+  items: { id: number; height: number }[],
+  columns: number,
+  capacity: number,
+): number[][] {
+  const pages: number[][] = []
+  let page: number[] = [],
+    used = 0
+  for (let index = 0; index < items.length; index += columns) {
+    const row = items.slice(index, index + columns)
+    const height = Math.max(...row.map((item) => item.height))
+    if (page.length && used + height > capacity) {
+      pages.push(page)
+      page = []
+      used = 0
+    }
+    page.push(...row.map((item) => item.id))
+    used += height
+  }
+  if (page.length) pages.push(page)
+  return pages
+}
 export function gridShape(paper: Paper, density: View['density']) {
   const shapes = {
     letter: {
@@ -8,12 +46,12 @@ export function gridShape(paper: Paper, density: View['density']) {
       large: [2, 3],
     },
     half: {
-      dense: [3, 5],
+      dense: [4, 4],
       compact: [3, 4],
       comfortable: [2, 3],
       large: [2, 2],
     },
-    a5: { dense: [3, 5], compact: [3, 4], comfortable: [2, 3], large: [2, 2] },
+    a5: { dense: [4, 4], compact: [3, 4], comfortable: [2, 3], large: [2, 2] },
     a6: { dense: [2, 4], compact: [2, 3], comfortable: [2, 2], large: [1, 2] },
   }
   const [columns, rows] = shapes[paper][density]

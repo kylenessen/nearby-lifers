@@ -73,6 +73,8 @@ export type View = {
   grouping: 'natural' | 'family' | 'order' | 'none'
   printMode: 'sheets' | 'booklet'
   bookletTitle: string
+  showPhotoCredits: boolean
+  bookletSheetLimit: number
 }
 export type Settings = { search: Search; view: View }
 export const DEFAULT_CENTER = { lat: 35.327632, lng: -120.839097 }
@@ -102,6 +104,8 @@ export function defaults(date = new Date()): Settings {
       grouping: 'natural',
       printMode: 'sheets',
       bookletTitle: 'Nearby Lifers',
+      showPhotoCredits: false,
+      bookletSheetLimit: 40,
     },
   }
 }
@@ -288,6 +292,8 @@ export function encodeSettings({ search, view }: Settings) {
   p.set('grouping', view.grouping)
   p.set('print', view.printMode)
   if (view.bookletTitle !== 'Nearby Lifers') p.set('title', view.bookletTitle)
+  p.set('credits', view.showPhotoCredits ? '1' : '0')
+  p.set('sheet_limit', String(view.bookletSheetLimit))
   return p.toString()
 }
 export function decodeSettings(query: string, date = new Date()): Settings {
@@ -351,6 +357,10 @@ export function decodeSettings(query: string, date = new Date()): Settings {
     view.grouping = p.get('grouping') as View['grouping']
   if (p.get('print') === 'booklet') view.printMode = 'booklet'
   if (p.has('title')) view.bookletTitle = p.get('title')!.slice(0, 120)
+  view.showPhotoCredits = p.get('credits') === '1'
+  const sheetLimit = Number(p.get('sheet_limit'))
+  if (Number.isInteger(sheetLimit) && sheetLimit >= 1 && sheetLimit <= 1000)
+    view.bookletSheetLimit = sheetLimit
   const error = validateSearch(search)
   if (error) throw new Error(error)
   return settings

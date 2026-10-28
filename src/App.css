@@ -412,6 +412,23 @@ fieldset legend {
   border-color: #e3b49d;
   color: #713e26;
 }
+.notice.sheet-warning {
+  background: #fff2d3;
+  border-color: #c39743;
+  margin: 12px 0;
+}
+.sheet-limit-label {
+  display: block;
+  margin-top: 12px;
+}
+.sheet-limit-label input {
+  display: block;
+  max-width: 120px;
+  margin-top: 5px;
+}
+.print-credit-option {
+  margin: 12px 0;
+}
 .error-text,
 .map-instructions .error-text {
   color: #973d23;

@@ -53,6 +53,38 @@ function writeUrl(settings: Settings, push = false) {
     return
   window.history[push ? 'pushState' : 'replaceState'](null, '', url)
 }
+function SheetLimitField({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (value: number) => void
+}) {
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+  return (
+    <label className="sheet-limit-label">
+      Warn above this many sheets
+      <input
+        type="number"
+        min="1"
+        max="1000"
+        step="1"
+        value={draft}
+        onChange={(event) => {
+          const text = event.target.value
+          setDraft(text)
+          const number = Number(text)
+          if (text && Number.isInteger(number) && number >= 1 && number <= 1000)
+            onChange(number)
+        }}
+        onBlur={() => setDraft(String(value))}
+      />
+    </label>
+  )
+}
 export default function App() {
   const [initial] = useState(initialSettings)
   const [builderOpen, setBuilderOpen] = useState(
@@ -80,6 +112,7 @@ export default function App() {
   const [preview, setPreview] = useState(false)
   const [copyMessage, setCopyMessage] = useState('')
   const [printing, setPrinting] = useState(false)
+  const [bookletSheets, setBookletSheets] = useState(0)
   const [printMessage, setPrintMessage] = useState('')
   const requestRef = useRef<AbortController | null>(null)
   const initialUrlWritten = useRef(false)
@@ -831,6 +864,20 @@ export default function App() {
                         </select>
                       </label>
                     </div>
+                    {view.layout === 'grid' && (
+                      <label className="checkbox print-credit-option">
+                        <input
+                          type="checkbox"
+                          checked={view.showPhotoCredits}
+                          onChange={(event) =>
+                            updateView({
+                              showPhotoCredits: event.target.checked,
+                            })
+                          }
+                        />
+                        Show photo credits
+                      </label>
+                    )}
                     {view.printMode === 'booklet' ? (
                       <>
                         <label className="booklet-title-label">
@@ -844,6 +891,24 @@ export default function App() {
                             }
                           />
                         </label>
+                        <SheetLimitField
+                          value={view.bookletSheetLimit}
+                          onChange={(value) =>
+                            updateView({ bookletSheetLimit: value })
+                          }
+                        />
+                        <p className="hint">
+                          {bookletSheets} physical sheets, printed double-sided.
+                          Each sheet makes four booklet pages.
+                        </p>
+                        {bookletSheets > view.bookletSheetLimit && (
+                          <div className="notice sheet-warning" role="alert">
+                            This booklet uses {bookletSheets} physical sheets,
+                            above your {view.bookletSheetLimit}-sheet warning
+                            limit. Check your staples’ capacity or reduce the
+                            search before printing.
+                          </div>
+                        )}
                         <p className="hint">
                           Print on Letter paper in landscape, double-sided,
                           flipping on the short edge. Use 100% scale and turn
@@ -1029,6 +1094,7 @@ export default function App() {
       </div>
       {snapshot && (
         <PrintPreview
+          onBookletSheetsChange={setBookletSheets}
           snapshot={snapshot}
           species={visible}
           view={view}

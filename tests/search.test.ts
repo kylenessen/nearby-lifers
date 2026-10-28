@@ -45,9 +45,33 @@ test('every area and every view option round trips through a portable link', () 
       grouping: 'family',
       printMode: 'booklet',
       bookletTitle: 'Ducks & geese near Morro Bay',
+      showPhotoCredits: true,
+      bookletSheetLimit: 23,
     })
     assert.deepEqual(decodeSettings(encodeSettings(settings)), settings)
   }
+})
+test('old bookmarks default to forty sheets and malformed limits cannot disable warnings', () => {
+  for (const query of [
+    '',
+    '?sheet_limit=0',
+    '?sheet_limit=-1',
+    '?sheet_limit=no',
+    '?sheet_limit=1.5',
+    '?sheet_limit=1001',
+  ]) {
+    const { view } = decodeSettings(query)
+    assert.equal(view.bookletSheetLimit, 40)
+    assert.equal(view.showPhotoCredits, false)
+  }
+  assert.equal(
+    decodeSettings('?sheet_limit=1&credits=1').view.bookletSheetLimit,
+    1,
+  )
+  assert.equal(
+    decodeSettings('?sheet_limit=1&credits=1').view.showPhotoCredits,
+    true,
+  )
 })
 test('saved months stay fixed when a bookmark opens in a different season', () => {
   const winter = defaults(new Date(2026, 11, 15))
