@@ -24,7 +24,7 @@ function gridShape(paper: Paper, density: View['density']) {
         : {
             dense: [4, 4],
             compact: [3, 4],
-            comfortable: [3, paper === 'a5' ? 3 : 4],
+            comfortable: [3, 3],
             large: [2, 3],
           }
   const [columns, rows] = shapes[density]
@@ -32,10 +32,12 @@ function gridShape(paper: Paper, density: View['density']) {
 }
 
 async function decodeSearchQr(page: Page) {
-  const graphic = await page.locator('.booklet-search-qr').evaluate((svg) => ({
-    size: Number(svg.getAttribute('viewBox')!.split(' ')[2]),
-    path: svg.querySelector('path')!.getAttribute('d')!,
-  }))
+  const graphic = await page
+    .locator('.booklet-stack .booklet-search-qr')
+    .evaluate((svg) => ({
+      size: Number(svg.getAttribute('viewBox')!.split(' ')[2]),
+      path: svg.querySelector('path')!.getAttribute('d')!,
+    }))
   const scale = Math.floor((44 * 300) / 25.4 / graphic.size)
   const width = graphic.size * scale
   const pixels = new Uint8ClampedArray(width * width * 4).fill(255)
@@ -656,16 +658,24 @@ for (const layout of ['grid', 'list'] as const) {
     await expect(stack.locator('.booklet-cover h1')).toHaveText(
       'Morro Bay birds & other discoveries',
     )
-    await expect(stack.locator('.booklet-owner')).toHaveText('@kylenessen')
-    await expect(stack.locator('.booklet-date')).toContainText('Generated')
+    await expect(stack.locator('.booklet-owner')).toHaveText('@kylenessen’s')
+    await expect(stack.locator('.booklet-date')).not.toContainText('Generated')
+    await expect(stack.locator('.booklet-tool-name')).toHaveText(
+      'Nearby Lifers for',
+    )
     const parameters = stack.locator('[data-page-number="2"]')
     await expect(parameters).toHaveAttribute('data-page-kind', 'parameters')
     await expect(parameters).toContainText('Booklet search filters')
-    await expect(parameters).toContainText('All dates and locations')
+    await expect(
+      stack
+        .locator('.booklet-parameters')
+        .filter({ hasText: 'All dates and locations' }),
+    ).toHaveCount(1)
+    await expect(parameters).toContainText('Generated on')
     await expect(parameters.locator('.print-map-canvas svg path')).toHaveCount(
       1,
     )
-    const contents = stack.locator('[data-page-number="3"]')
+    const contents = stack.locator('[data-page-kind="contents"]')
     await expect(contents).toHaveAttribute('data-page-kind', 'contents')
     const references = await contents
       .locator('.contents-entry')
@@ -691,7 +701,7 @@ for (const layout of ['grid', 'list'] as const) {
       .locator('.staple-guide')
       .evaluateAll((guides) =>
         guides.map((guide) => {
-          const rect = guide.getBoundingClientRect()
+          const rect = guide.querySelector('path')!.getBoundingClientRect()
           const side = guide.closest('.booklet-side')!.getBoundingClientRect()
           return {
             length: rect.height / 96,
@@ -699,6 +709,9 @@ for (const layout of ['grid', 'list'] as const) {
           }
         }),
       )
+    await expect(
+      stack.locator('.booklet-side').first().locator('.staple-guide circle'),
+    ).toHaveCount(6)
     expect(marks).toHaveLength(3)
     for (let i = 0; i < 3; i++) {
       expect(marks[i].length).toBeCloseTo(0.5, 2)
@@ -811,9 +824,13 @@ for (const layout of ['grid', 'list'] as const) {
       .getByRole('combobox', { name: 'Group by', exact: true })
       .selectOption('none')
     await expect(stack.locator('[data-page-kind="contents"]')).toHaveCount(0)
-    await expect(stack.locator('[data-page-number="3"]')).toHaveAttribute(
-      'data-page-kind',
-      'content',
+    const firstContent = await stack
+      .locator('[data-content-index="0"]')
+      .evaluate((el) =>
+        Number((el.closest('.booklet-slot') as HTMLElement).dataset.pageNumber),
+      )
+    expect(firstContent).toBe(
+      2 + (await stack.locator('[data-page-kind="parameters"]').count()),
     )
   })
 }
@@ -849,18 +866,17 @@ test('booklet maps preserve the searched place, rectangle, and polygon', async (
     await page
       .getByRole('button', { name: 'Print options', exact: true })
       .click()
-    const parameters = page.locator('.booklet-parameters-page')
+    const parameters = page.locator('.booklet-stack .booklet-parameters-page')
     await expect(parameters.locator('.print-map-canvas svg path')).toHaveCount(
       1,
     )
-    await expect(parameters.locator('.booklet-search-link')).toHaveAttribute(
-      'href',
+    await expect(parameters.locator('.booklet-search-access a')).toHaveCount(0)
+    expect(await decodeSearchQr(page)).toBe(
       `https://kylenessen.github.io/nearby-lifers/?${encodeSettings(settings)}`,
     )
-    expect(await decodeSearchQr(page)).toBe(
-      await parameters.locator('.booklet-search-link').getAttribute('href'),
-    )
-    await expect(parameters).toContainText(
+    await expect(
+      parameters.locator('.booklet-parameters').filter({ hasText: 'Area' }),
+    ).toContainText(
       area.kind === 'place'
         ? 'iNaturalist place 12'
         : area.kind === 'polygon'
@@ -868,7 +884,9 @@ test('booklet maps preserve the searched place, rectangle, and polygon', async (
           : 'Rectangle from',
     )
     expect(
-      await parameters.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+      await parameters.evaluateAll((pages) =>
+        pages.some((el) => el.scrollHeight > el.clientHeight + 1),
+      ),
     ).toBe(false)
   }
 })
@@ -1104,7 +1122,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
   await expect(stack.locator('.print-card')).toHaveCount(42)
   await expect(columns).toHaveValue('3')
   await expect(rows).toHaveValue('4')
-  await expect(textSize).toHaveValue('10')
+  await expect(textSize).toHaveValue('9')
   await expect(
     page.getByRole('combobox', { name: 'Photo grid text size', exact: true }),
   ).toHaveCount(0)
@@ -1117,15 +1135,15 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
     contents: getComputedStyle(root.querySelector('.contents-entry')!).fontSize,
   }))
   expect(supportingSizes).toEqual({
-    filters: '10px',
-    footer: '8px',
-    contents: '12px',
+    filters: '16px',
+    footer: '12px',
+    contents: '16px',
   })
   const searchRequests = requests.filter((r) =>
     r.pathname.includes('/observations'),
   ).length
   for (const [cols, rowCount, size] of [
-    [3, 4, '10'],
+    [3, 4, '9'],
     [2, 3, '10'],
     [4, 4, '8'],
     [1, 2, '14'],
@@ -1164,6 +1182,10 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
     expect(
       Math.max(...photos.map(([width]) => width)) -
         Math.min(...photos.map(([width]) => width)),
+    ).toBeLessThan(1)
+    expect(
+      Math.max(...photos.map(([, height]) => height)) -
+        Math.min(...photos.map(([, height]) => height)),
     ).toBeLessThan(1)
     const galleryIssues = await stack
       .locator('.print-card')
@@ -1253,12 +1275,17 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
     expect(new Set(pages.flatMap((p) => p.ids)).size).toBe(42)
     for (const p of pages.slice(0, -1)) {
       expect(p.ids.length).toBeGreaterThan(0)
-      expect(p.ids.length).toBeLessThanOrEqual(cols * rowCount)
+      expect(p.ids.length).toBe(cols * rowCount)
       expect(p.ids.length % cols).toBe(0)
       expect(Math.abs(p.bottomGap)).toBeLessThan(1)
     }
     for (const p of pages) {
-      expect(Math.abs(p.bottomGap)).toBeLessThan(1)
+      const emptyRows = rowCount - Math.ceil(p.ids.length / cols)
+      expect(p.bottomGap).toBeCloseTo(
+        emptyRows * (p.heights[0] + (3 * 96) / 25.4),
+        0,
+      )
+      expect(Math.abs(p.heights[0] - pages[0].heights[0])).toBeLessThan(1)
       expect(p.overflow).toBe(false)
       expect(p.fits).toBe(true)
       expect(p.heights.every((height) => height > 0)).toBe(true)
@@ -1285,10 +1312,8 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
   ).toBe(searchRequests)
   expect(new URL(page.url()).searchParams.get('columns')).toBe('4')
   expect(new URL(page.url()).searchParams.get('rows')).toBe('4')
-  const searchUrl = await stack
-    .locator('.booklet-search-link')
-    .getAttribute('href')
-  expect(await decodeSearchQr(page)).toBe(searchUrl)
+  const searchUrl = await decodeSearchQr(page)
+  expect(new URL(searchUrl!).search).toBe(new URL(page.url()).search)
   expect(new URL(searchUrl!).searchParams.get('font_size')).toBe('8')
   await page.reload()
   await page.getByRole('button', { name: 'Print options', exact: true }).click()
@@ -1301,6 +1326,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
     .screenshot({ path: 'test-results/booklet-photo-gallery.png' })
   await stack
     .locator('.booklet-parameters-page')
+    .filter({ has: page.locator('.booklet-search-qr') })
     .screenshot({ path: 'test-results/booklet-search-qr.png' })
   const sides = await stack.locator('.booklet-side').count()
   await page.emulateMedia({ media: 'print' })
@@ -1312,7 +1338,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
   expect(pdf.toString('latin1').match(/\/Type \/Page\b/g)?.length).toBe(sides)
 })
 
-test('an oversized polygon QR keeps the booklet usable and preserves its exact PDF link', async ({
+test('an oversized polygon QR keeps the booklet usable and explains how to save its link', async ({
   page,
 }) => {
   await mockApi(page)
@@ -1328,16 +1354,13 @@ test('an oversized polygon QR keeps the booklet usable and preserves its exact P
   const query = encodeSettings(settings)
   await page.goto(`/?${query}`)
   await page.getByRole('button', { name: 'Print options', exact: true }).click()
-  const parameters = page.locator('.booklet-parameters-page')
-  await expect(parameters).toContainText('Booklet search filters')
+  const parameters = page.locator('.booklet-stack .booklet-parameters-page')
+  await expect(parameters.first()).toContainText('Booklet search filters')
   await expect(parameters.locator('.booklet-search-qr')).toHaveCount(0)
   await expect(parameters.locator('.booklet-qr-unavailable')).toContainText(
     'too long for one QR code',
   )
-  await expect(parameters.locator('.booklet-search-link')).toHaveAttribute(
-    'href',
-    `https://kylenessen.github.io/nearby-lifers/?${query}`,
-  )
+  await expect(parameters.locator('.booklet-search-access a')).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: 'Print or save PDF' }),
   ).toBeEnabled()
