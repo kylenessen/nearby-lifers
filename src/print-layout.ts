@@ -1,14 +1,18 @@
 import type { View } from './search.ts'
 
 export const GROUP_COLORS = [
-  '#cf4da8',
-  '#75ab3d',
-  '#8d67cb',
-  '#b68f40',
-  '#6592cf',
-  '#cc5a43',
-  '#54a676',
-  '#c26186',
+  '#73dad1',
+  '#ecaaae',
+  '#77d4e4',
+  '#e3c297',
+  '#74aff3',
+  '#ccdba3',
+  '#deb1e0',
+  '#98ce9d',
+  '#adbce9',
+  '#b3edd5',
+  '#7cc9ef',
+  '#93c3af',
 ]
 
 // Keep the full-page grid on every page, leaving unused final cells empty.

@@ -1,5 +1,4 @@
-import { useMemo } from 'react'
-import { encodeSettings, GROUPS, MONTHS } from './search'
+import { GROUPS, MONTHS } from './search'
 import type { View } from './search'
 import type { Snapshot } from './inaturalist'
 import { PUBLIC_SITE_URL, qrGraphic } from './qr'
@@ -49,23 +48,12 @@ export function BookletParameters({
   snapshot,
   view,
   count,
-  blockIndices,
 }: {
   snapshot: Snapshot
   view: View
   count: number
-  blockIndices?: number[]
 }) {
   const { search } = snapshot
-  const searchUrl = `${PUBLIC_SITE_URL}?${encodeSettings({ search, view })}`
-  const searchQr = useMemo(() => {
-    try {
-      return qrGraphic(searchUrl)
-    } catch {
-      // Very detailed polygons can exceed the QR format's capacity.
-      return null
-    }
-  }, [searchUrl])
   const { area } = search
   const areaDetails =
     area.kind === 'circle'
@@ -74,7 +62,7 @@ export function BookletParameters({
         ? `Rectangle from ${area.bounds.sw.lat}, ${area.bounds.sw.lng} to ${area.bounds.ne.lat}, ${area.bounds.ne.lng}`
         : area.kind === 'place'
           ? `iNaturalist place ${area.id}`
-          : `Polygon with ${area.points.length} corners. The exact boundary is saved in the search link.`
+          : `Polygon with ${area.points.length} corners. Boundary shown above.`
   const parameters = [
     [
       'Generated on',
@@ -130,45 +118,17 @@ export function BookletParameters({
       `${view.layout === 'grid' ? `${printGrid(view).columns} columns, up to ${printGrid(view).rows} rows. ${view.gridFontSize ?? 9} pt. Photos cropped to fill, credits ${view.showPhotoCredits ? 'shown' : 'hidden'}` : `Checklist. ${{ comfortable: 'Comfortable', compact: 'Compact', dense: 'Extra compact', large: 'Large' }[view.density]}`}. ${count} species. Letter folded to 5.5 × 8.5 in.`,
     ],
   ]
-  const blocks = [
-    <PrintMap key="map" snapshot={snapshot} />,
-    ...parameters.map(([label, value]) => (
-      <dl className="booklet-parameters" key={label}>
-        <div>
-          <dt>{label}</dt>
-          <dd>{value}</dd>
-        </div>
-      </dl>
-    )),
-    <div className="booklet-search-access" key="qr">
-      {searchQr ? (
-        <>
-          <QrImage
-            graphic={searchQr}
-            className="booklet-search-qr"
-            label="QR code to reopen this search"
-          />
-          <p className="booklet-search-caption">Reopen this search</p>
-        </>
-      ) : (
-        <p className="booklet-qr-unavailable">
-          This search is too long for one QR code. Save its link from the
-          website.
-        </p>
-      )}
-    </div>,
-  ]
   return (
     <>
-      {(blockIndices ?? blocks.map((_, index) => index)).map((index) => (
-        <div
-          className="booklet-parameter-block"
-          data-parameter-block={index}
-          key={index}
-        >
-          {blocks[index]}
-        </div>
-      ))}
+      <PrintMap snapshot={snapshot} />
+      <dl className="booklet-parameters">
+        {parameters.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
     </>
   )
 }
