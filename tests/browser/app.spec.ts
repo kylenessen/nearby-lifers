@@ -638,8 +638,21 @@ for (const layout of ['grid', 'list'] as const) {
     await expect(stack.locator('.booklet-owner')).toHaveText('@kylenessen’s')
     await expect(stack.locator('.booklet-date')).not.toContainText('Generated')
     await expect(stack.locator('.booklet-tool-name')).toHaveText(
-      'Nearby Lifers for',
+      'Nearby Lifers for:',
     )
+    expect(
+      await stack.locator('.booklet-cover').evaluate((el) => {
+        const owner = el.querySelector('.booklet-owner')!
+        const tool = el.querySelector('.booklet-tool-name')!
+        return {
+          sameFont:
+            getComputedStyle(owner).font === getComputedStyle(tool).font,
+          ownerAbove:
+            owner.getBoundingClientRect().bottom <
+            tool.getBoundingClientRect().top,
+        }
+      }),
+    ).toEqual({ sameFont: true, ownerAbove: true })
     const parameters = stack.locator('[data-page-number="2"]')
     await expect(parameters).toHaveAttribute('data-page-kind', 'parameters')
     await expect(parameters).toContainText('Search Filters')
@@ -649,6 +662,22 @@ for (const layout of ['grid', 'list'] as const) {
         .filter({ hasText: 'All dates and locations' }),
     ).toHaveCount(1)
     await expect(parameters).toContainText('Generated on')
+    await expect(
+      parameters.locator('.booklet-print-instructions'),
+    ).toContainText('landscape')
+    await expect(
+      parameters.locator('.booklet-print-instructions'),
+    ).toContainText('Print both sides and flip on the short edge')
+    expect(
+      await parameters.evaluate(
+        (el) =>
+          el
+            .querySelector('.booklet-print-instructions')!
+            .getBoundingClientRect().top >=
+          el.querySelector('.booklet-parameters')!.getBoundingClientRect()
+            .bottom,
+      ),
+    ).toBe(true)
     await expect(parameters.locator('.print-map-canvas svg path')).toHaveCount(
       1,
     )
@@ -801,6 +830,7 @@ for (const layout of ['grid', 'list'] as const) {
       .getByRole('combobox', { name: 'Group by', exact: true })
       .selectOption('none')
     await expect(stack.locator('[data-page-kind="contents"]')).toHaveCount(0)
+    await expect(stack.locator('.page-group-header')).toHaveCount(0)
     const firstContent = await stack
       .locator('[data-content-index="0"]')
       .evaluate((el) =>
@@ -956,9 +986,32 @@ test('long contents paginate without losing groups or shifting their references'
       )
     expect(entry.page).toBe(Math.min(...slots))
   }
+  await page.getByRole('button', { name: 'Photo grid', exact: true }).click()
+  const wrappedHeaders = await stack
+    .locator('[data-page-kind="content"] .page-group-header')
+    .evaluateAll((headers) =>
+      headers.map((header) => ({
+        height: header.getBoundingClientRect().height,
+        line: parseFloat(getComputedStyle(header).lineHeight),
+        overlaps:
+          header.getBoundingClientRect().bottom >
+          header.parentElement!
+            .querySelector('.print-grid')!
+            .getBoundingClientRect().top,
+      })),
+    )
+  expect(wrappedHeaders.length).toBeGreaterThan(1)
+  expect(wrappedHeaders.every((header) => header.height > header.line)).toBe(
+    true,
+  )
+  expect(wrappedHeaders.some((header) => header.overlaps)).toBe(false)
+  const photoHeights = await stack.locator('.print-photo').evaluateAll((photos) =>
+    photos.map((photo) => photo.getBoundingClientRect().height),
+  )
+  expect(Math.max(...photoHeights) - Math.min(...photoHeights)).toBeLessThan(1)
 })
 
-test('booklet photo controls preserve photo proportions, group colors, and physical-sheet warnings', async ({
+test('booklet photo controls preserve photo proportions and physical-sheet warnings', async ({
   page,
 }) => {
   const requests = await mockApi(page)
@@ -1000,7 +1053,6 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
       )
       const errors = await stack.evaluate((root) => {
         const errors: string[] = []
-        const colors = new Map<string, string>()
         for (const card of root.querySelectorAll<HTMLElement>('.print-card')) {
           const photo = card
             .querySelector('.print-photo')!
@@ -1040,17 +1092,9 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
           )
             errors.push('record badge background is not opaque white')
           if (photo.height < (8 * 96) / 25.4 - 1) errors.push('photo too short')
-          const color = getComputedStyle(
-            card.querySelector('.print-card-group')!,
-          ).backgroundColor
-          const group = card.dataset.group!
-          if (colors.has(group) && colors.get(group) !== color)
-            errors.push('group color changed across pages')
-          if (color === 'rgba(0, 0, 0, 0)') errors.push('missing group color')
-          colors.set(group, color)
+          if (card.querySelector('.print-card-group'))
+            errors.push('card still repeats its group')
         }
-        if (new Set(colors.values()).size !== colors.size)
-          errors.push('neighboring fixture groups share colors')
         return errors
       })
       expect(errors, `${density}, credits ${showCredits}`).toEqual([])
@@ -1151,7 +1195,7 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
         cards.flatMap((card) =>
           Array.from(
             card.querySelectorAll(
-              '.print-card-group, .print-names strong, .print-names i, .print-records',
+              '.print-names strong, .print-names i, .print-records',
             ),
           ).map((el) => getComputedStyle(el).fontSize),
         ),
@@ -1179,6 +1223,39 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
       Math.max(...photos.map(([, height]) => height)) -
         Math.min(...photos.map(([, height]) => height)),
     ).toBeLessThan(1)
+    await expect(stack.locator('.print-card-group')).toHaveCount(0)
+    const headerIssues = await stack.evaluate((root) => {
+      const labels = new Map(
+        Array.from(root.querySelectorAll<HTMLElement>('.contents-entry')).map(
+          (row) => [row.dataset.group, row.querySelector('span')!.textContent],
+        ),
+      )
+      return Array.from(
+        root.querySelectorAll<HTMLElement>('[data-content-index]'),
+      ).flatMap((sheet) => {
+        const cards = Array.from(
+          sheet.querySelectorAll<HTMLElement>('.print-card'),
+        )
+        const first = labels.get(cards[0].dataset.group)
+        const last = labels.get(cards[cards.length - 1].dataset.group)
+        const expected = first === last ? first : first + ' through ' + last
+        const header = sheet.querySelector('.page-group-header')!
+        const errors = []
+        if (header.textContent !== expected) errors.push('wrong group range')
+        if (
+          getComputedStyle(header).fontSize !==
+          getComputedStyle(sheet.querySelector('.sheet-footer')!).fontSize
+        )
+          errors.push('header font differs from footer')
+        if (
+          header.getBoundingClientRect().bottom >
+          sheet.querySelector('.print-grid')!.getBoundingClientRect().top
+        )
+          errors.push('header overlaps photos')
+        return errors
+      })
+    })
+    expect(headerIssues).toEqual([])
     const galleryIssues = await stack
       .locator('.print-card')
       .evaluateAll((cards) =>
@@ -1187,9 +1264,6 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
           const frame = card.getBoundingClientRect()
           const photo = card
             .querySelector('.print-photo')!
-            .getBoundingClientRect()
-          const group = card
-            .querySelector('.print-card-group')!
             .getBoundingClientRect()
           const names = card
             .querySelector('.print-names')!
@@ -1208,20 +1282,8 @@ test('booklet photo gallery crops to fill the page, preserves readable text, and
             Math.abs(photo.bottom - peerPhoto.bottom) > 1
           )
             errors.push('photos do not align within their row')
-          const barStyle = getComputedStyle(
-            card.querySelector('.print-card-group')!,
-          )
-          const singleLine =
-            parseFloat(barStyle.lineHeight) +
-            parseFloat(barStyle.paddingTop) +
-            parseFloat(barStyle.paddingBottom)
-          if (Math.abs(photo.top - group.top - singleLine) > 1)
-            errors.push('group bar reserves more than one line')
-          if (
-            group.bottom < photo.top - 1 ||
-            Math.abs(group.width - photo.width) > 1
-          )
-            errors.push('group bar does not cover the top of the photo')
+          if (Math.abs(photo.top - frame.top) > 1)
+            errors.push('photo still reserves a group bar')
           if (names.top < photo.bottom || names.top - photo.bottom > 6)
             errors.push('names are not just below the photo')
           if (parseFloat(getComputedStyle(card).borderTopWidth) > 0)
