@@ -20,7 +20,7 @@ function gridShape(paper: Paper, density: View['density']) {
     paper === 'letter'
       ? { dense: [5, 6], compact: [4, 5], comfortable: [3, 4], large: [2, 3] }
       : paper === 'a6'
-        ? { dense: [2, 3], compact: [2, 2], comfortable: [2, 2], large: [1, 2] }
+        ? { dense: [2, 3], compact: [2, 2], comfortable: [2, 2], large: [2, 2] }
         : {
             dense: [4, 4],
             compact: [3, 4],
@@ -390,7 +390,7 @@ for (const layout of ['grid', 'list'] as const) {
             .getByLabel('Columns per page', { exact: true })
             .fill(String(shape.columns))
           await page
-            .getByLabel('Rows per page', { exact: true })
+            .getByLabel('Rows per page (maximum)', { exact: true })
             .fill(String(shape.rows))
         }
         const output = page.locator('.sheet-stack')
@@ -460,7 +460,9 @@ for (const layout of ['grid', 'list'] as const) {
       .selectOption('a6')
     await setPrintTextSize(page, layout, 'comfortable')
     if (layout === 'grid')
-      await page.getByLabel('Rows per page', { exact: true }).fill('2')
+      await page
+        .getByLabel('Rows per page (maximum)', { exact: true })
+        .fill('2')
     await page
       .locator('.sheet-stack .print-sheet')
       .first()
@@ -988,11 +990,11 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
       .getByLabel('Columns per page', { exact: true })
       .fill(String(shape.columns))
     await page
-      .getByLabel('Rows per page', { exact: true })
+      .getByLabel('Rows per page (maximum)', { exact: true })
       .fill(String(shape.rows))
     for (const showCredits of [false, true]) {
       await page
-        .getByLabel('Rows per page', { exact: true })
+        .getByLabel('Rows per page (maximum)', { exact: true })
         .fill(String(shape.rows - (showCredits ? 1 : 0)))
       await credits.setChecked(showCredits)
       await expect(stack.locator('.print-credit')).toHaveCount(
@@ -1086,18 +1088,18 @@ test('booklet photo controls preserve photo proportions, group colors, and physi
     .screenshot({ path: 'test-results/booklet-fitted-photos.png' })
 })
 
-test('custom booklet grids fill pages, preserve photos, and mirror the spine margin', async ({
+test('booklet photo gallery fills card widths, preserves readable text, and mirrors the spine margin', async ({
   page,
 }) => {
   const requests = await mockApi(page)
   const settings = defaults()
   settings.view.printMode = 'booklet'
-  settings.view.density = 'compact'
+  settings.view.density = 'comfortable'
   settings.view.bookletTitle = 'Morro Bay field guide'
   await page.goto(`/?${encodeSettings(settings)}`)
   await page.getByRole('button', { name: 'Print options', exact: true }).click()
   const columns = page.getByLabel('Columns per page', { exact: true })
-  const rows = page.getByLabel('Rows per page', { exact: true })
+  const rows = page.getByLabel('Rows per page (maximum)', { exact: true })
   const textSize = page.getByLabel('Font size (pt)', { exact: true })
   const stack = page.locator('.booklet-stack')
   await expect(stack.locator('.print-card')).toHaveCount(42)
@@ -1108,12 +1110,24 @@ test('custom booklet grids fill pages, preserve photos, and mirror the spine mar
     page.getByRole('combobox', { name: 'Photo grid text size', exact: true }),
   ).toHaveCount(0)
   await expect(page.locator('.grid-dimensions')).toContainText('Font size (pt)')
+  await expect(stack.locator('.print-card .paper-checkbox')).toHaveCount(0)
+  const supportingSizes = await stack.evaluate((root) => ({
+    filters: getComputedStyle(root.querySelector('.booklet-parameters')!)
+      .fontSize,
+    footer: getComputedStyle(root.querySelector('.sheet-footer')!).fontSize,
+    contents: getComputedStyle(root.querySelector('.contents-entry')!).fontSize,
+  }))
+  expect(supportingSizes).toEqual({
+    filters: '10px',
+    footer: '8px',
+    contents: '12px',
+  })
   const searchRequests = requests.filter((r) =>
     r.pathname.includes('/observations'),
   ).length
   for (const [cols, rowCount, size] of [
     [3, 4, '10'],
-    [2, 4, '12'],
+    [2, 3, '10'],
     [4, 4, '8'],
     [1, 2, '14'],
   ] as const) {
@@ -1149,6 +1163,38 @@ test('custom booklet grids fill pages, preserve photos, and mirror the spine mar
       Math.max(...photos.map(([width]) => width)) -
         Math.min(...photos.map(([width]) => width)),
     ).toBeLessThan(1)
+    const galleryIssues = await stack
+      .locator('.print-card')
+      .evaluateAll((cards) =>
+        cards.flatMap((card) => {
+          const errors = []
+          const frame = card.getBoundingClientRect()
+          const photo = card
+            .querySelector('.print-photo')!
+            .getBoundingClientRect()
+          const group = card
+            .querySelector('.print-card-group')!
+            .getBoundingClientRect()
+          const names = card
+            .querySelector('.print-names')!
+            .getBoundingClientRect()
+          if (Math.abs(photo.width - frame.width) > 1)
+            errors.push('photo does not fill the card')
+          if (
+            Math.abs(group.bottom - photo.top) > 1 ||
+            Math.abs(group.width - photo.width) > 1
+          )
+            errors.push('group bar does not touch the photo')
+          if (names.top < photo.bottom || names.top - photo.bottom > 6)
+            errors.push('names are not just below the photo')
+          if (parseFloat(getComputedStyle(card).borderTopWidth) > 0)
+            errors.push('card still has a border')
+          if (parseFloat(getComputedStyle(card.parentElement!).columnGap) <= 0)
+            errors.push('cards have no white spacing')
+          return errors
+        }),
+      )
+    expect(galleryIssues).toEqual([])
     await expect(page.locator('.grid-warning')).toHaveCount(0)
     await expect(
       page.getByRole('button', { name: 'Print or save PDF' }),
@@ -1192,25 +1238,28 @@ test('custom booklet grids fill pages, preserve photos, and mirror the spine mar
       )
     expect(new Set(pages.flatMap((p) => p.ids)).size).toBe(42)
     for (const p of pages.slice(0, -1)) {
-      expect(p.ids).toHaveLength(cols * rowCount)
-      expect(Math.abs(p.bottomGap)).toBeLessThan(1)
+      expect(p.ids.length).toBeGreaterThan(0)
+      expect(p.ids.length).toBeLessThanOrEqual(cols * rowCount)
+      expect(p.ids.length % cols).toBe(0)
+      expect(p.bottomGap).toBeGreaterThanOrEqual(-1)
     }
     for (const p of pages) {
       expect(p.overflow).toBe(false)
       expect(p.fits).toBe(true)
-      expect(Math.max(...p.heights) - Math.min(...p.heights)).toBeLessThan(1)
+      expect(p.heights.every((height) => height > 0)).toBe(true)
       expect((p.innerMargin * 25.4) / 96).toBeCloseTo(14, 1)
       expect((p.outerMargin * 25.4) / 96).toBeCloseTo(9, 1)
     }
   }
   await columns.fill('8')
   await rows.fill('8')
-  await expect(page.locator('.grid-warning')).toContainText('too little room')
+  await textSize.fill('24')
+  await expect(page.locator('.grid-warning')).toContainText('need more room')
   await expect(
     page.getByRole('button', { name: 'Print or save PDF' }),
   ).toBeDisabled()
-  await columns.fill('3')
-  await rows.fill('4')
+  await columns.fill('2')
+  await rows.fill('3')
   await textSize.fill('10')
   await expect(page.locator('.grid-warning')).toHaveCount(0)
   await expect(
@@ -1219,8 +1268,8 @@ test('custom booklet grids fill pages, preserve photos, and mirror the spine mar
   expect(
     requests.filter((r) => r.pathname.includes('/observations')).length,
   ).toBe(searchRequests)
-  expect(new URL(page.url()).searchParams.get('columns')).toBe('3')
-  expect(new URL(page.url()).searchParams.get('rows')).toBe('4')
+  expect(new URL(page.url()).searchParams.get('columns')).toBe('2')
+  expect(new URL(page.url()).searchParams.get('rows')).toBe('3')
   const searchUrl = await stack
     .locator('.booklet-search-link')
     .getAttribute('href')
@@ -1229,19 +1278,19 @@ test('custom booklet grids fill pages, preserve photos, and mirror the spine mar
   await page.reload()
   await page.getByRole('button', { name: 'Print options', exact: true }).click()
   await expect(textSize).toHaveValue('10')
-  await expect(columns).toHaveValue('3')
-  await expect(rows).toHaveValue('4')
+  await expect(columns).toHaveValue('2')
+  await expect(rows).toHaveValue('3')
   await expect(stack.locator('.print-card')).toHaveCount(42)
   await stack
     .locator('[data-content-index="0"]')
-    .screenshot({ path: 'test-results/booklet-custom-grid.png' })
+    .screenshot({ path: 'test-results/booklet-photo-gallery.png' })
   await stack
     .locator('.booklet-parameters-page')
     .screenshot({ path: 'test-results/booklet-search-qr.png' })
   const sides = await stack.locator('.booklet-side').count()
   await page.emulateMedia({ media: 'print' })
   const pdf = await page.pdf({
-    path: 'test-results/booklet-custom-grid.pdf',
+    path: 'test-results/booklet-photo-gallery.pdf',
     preferCSSPageSize: true,
     printBackground: true,
   })
