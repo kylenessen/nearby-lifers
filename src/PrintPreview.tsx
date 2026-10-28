@@ -105,9 +105,6 @@ function PrintCard({
             }}
           />
         )}
-        <span className="paper-checkbox">
-          {species.observedByUser ? '✓' : ''}
-        </span>
       </div>
       <div className="print-names">
         <strong>{species.commonName}</strong>
@@ -154,7 +151,7 @@ export function PrintPreview({
   const contentsMeasure = useRef<HTMLDivElement>(null)
   const [packed, setPacked] = useState<ListColumn[]>([])
   const [contentsRows, setContentsRows] = useState<number[][]>([])
-  const [photoSize, setPhotoSize] = useState(100000)
+  const [gridPages, setGridPages] = useState<number[][]>([])
   const groups = useMemo(
     () => groupSpecies(species, { sort: view.sort, grouping: view.grouping }),
     [species, view.grouping, view.sort],
@@ -192,9 +189,7 @@ export function PrintPreview({
     '--paper-width': `${paper.width}mm`,
     '--paper-height': `${paper.height}mm`,
     '--print-columns': columns,
-    '--print-rows': rows,
     '--grid-font': `${view.gridFontSize ?? 10}pt`,
-    '--print-photo-size': `${photoSize}px`,
     '--list-columns': listColumns,
     '--contents-columns': contentsColumns,
   } as CSSProperties
@@ -237,43 +232,15 @@ export function PrintPreview({
     const cards = Array.from(
       element.querySelectorAll<HTMLElement>('.print-card'),
     )
-    // Reserve the full selected text size first. Every photo uses the same
-    // largest square that fits, leaving spare space beneath shorter labels.
-    element.style.setProperty('--print-photo-size', '100000px')
-    let available = Infinity
-    for (const card of cards) {
-      const photo = card.querySelector('.print-photo')!
-      const css = getComputedStyle(card)
-      const inset = (
-        [
-          'paddingTop',
-          'paddingBottom',
-          'borderTopWidth',
-          'borderBottomWidth',
-        ] as const
-      ).reduce((sum, key) => sum + parseFloat(css[key]), 0)
-      const textHeight = Array.from(card.children)
-        .filter((child) => child !== photo)
-        .reduce((sum, child) => sum + child.getBoundingClientRect().height, 0)
-      available = Math.min(
-        available,
-        photo.getBoundingClientRect().width,
-        card.getBoundingClientRect().height -
-          inset -
-          textHeight -
-          parseFloat(css.rowGap) * (card.children.length - 1) -
-          0.5,
-      )
-    }
-    const size = Math.max(
-      (8 * 96) / 25.4,
-      Number.isFinite(available) ? available : 0,
-    )
-    element.style.setProperty('--print-photo-size', `${size}px`)
-    setPhotoSize(size)
-    onGridFitsChange?.(
-      cards.every((card) => card.scrollHeight <= card.clientHeight + 1),
-    )
+    const body = element.querySelector('.sheet-body')!
+    const capacity = body.getBoundingClientRect().height - 1
+    const gap = parseFloat(getComputedStyle(body).rowGap)
+    const items = cards.map((card) => ({
+      id: Number(card.dataset.speciesId),
+      height: card.getBoundingClientRect().height,
+    }))
+    setGridPages(packGrid(items, columns, rows, capacity, gap))
+    onGridFitsChange?.(items.every((item) => item.height <= capacity))
   }, [
     orderedSpecies,
     groups,
@@ -314,11 +281,7 @@ export function PrintPreview({
     view.bookletTitle,
   ])
 
-  const pages = packGrid(
-    orderedSpecies.map((s) => s.id),
-    columns,
-    rows,
-  ).map((ids) =>
+  const pages = gridPages.map((ids) =>
     ids.map((id) => byId.get(id)).filter((s): s is Species => Boolean(s)),
   )
   const listPages: ListColumn[][] = []
@@ -440,7 +403,7 @@ export function PrintPreview({
             : `${paper.label} · ${paper.dimensions} · ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}`}{' '}
           ·{' '}
           {view.layout === 'grid'
-            ? `${columns} columns × ${rows} rows · ${view.gridFontSize ?? 10} pt · Square photos`
+            ? `${columns} columns · Up to ${rows} rows per page · ${view.gridFontSize ?? 10} pt · Square photos`
             : 'Grouped checklist'}
         </p>
       )}

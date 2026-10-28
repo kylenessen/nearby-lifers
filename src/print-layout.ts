@@ -14,16 +14,32 @@ export const GROUP_COLORS = [
   '#f2f2f2',
 ]
 
-// Fixed cells fill the page. Group boundaries never create empty cells.
+// Keep full-width photos and complete rows together, up to the requested row limit.
 export function packGrid(
-  ids: number[],
+  items: { id: number; height: number }[],
   columns: number,
   rows: number,
+  capacity: number,
+  gap: number,
 ): number[][] {
   const pages: number[][] = []
-  const capacity = columns * rows
-  for (let index = 0; index < ids.length; index += capacity)
-    pages.push(ids.slice(index, index + capacity))
+  let page: number[] = []
+  let used = 0
+  let rowCount = 0
+  for (let index = 0; index < items.length; index += columns) {
+    const row = items.slice(index, index + columns)
+    const height = Math.max(...row.map((item) => item.height))
+    if (page.length && (rowCount === rows || used + gap + height > capacity)) {
+      pages.push(page)
+      page = []
+      used = 0
+      rowCount = 0
+    }
+    used += (rowCount ? gap : 0) + height
+    rowCount++
+    page.push(...row.map((item) => item.id))
+  }
+  if (page.length) pages.push(page)
   return pages
 }
 export function printGrid(view: View) {

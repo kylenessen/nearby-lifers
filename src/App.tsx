@@ -893,7 +893,7 @@ export default function App() {
                             }
                           />
                           <NumberField
-                            label="Rows per page"
+                            label="Rows per page (maximum)"
                             max={8}
                             value={printGrid(view).rows}
                             onChange={(value) =>
@@ -911,8 +911,8 @@ export default function App() {
                           />
                         </div>
                         <p className="hint">
-                          Square photos with space below for names and notes.
-                          All card text uses the selected font size.
+                          Photos fill each column. Complete rows move to the
+                          next page when needed to fit the photos and text.
                         </p>
                         <label className="checkbox print-credit-option">
                           <input
@@ -928,9 +928,9 @@ export default function App() {
                         </label>
                         {!gridFits && (
                           <div className="notice grid-warning" role="alert">
-                            This grid leaves too little room for names and
-                            photos. Choose fewer rows or columns, smaller text,
-                            or hide photo credits.
+                            Photos and text need more room on this paper. Add
+                            columns, use a smaller font or larger paper, or hide
+                            photo credits.
                           </div>
                         )}
                       </>

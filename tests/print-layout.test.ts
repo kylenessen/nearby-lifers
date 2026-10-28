@@ -17,19 +17,46 @@ test('every sheet and density defaults to three columns and four rows', () => {
       assert.deepEqual(printGrid(view), { columns: 3, rows: 4 })
     }
 })
-test('custom photo grids fill every page except the last without losing species', () => {
-  const ids = Array.from({ length: 37 }, (_, id) => id)
-  const pages = packGrid(ids, 3, 4)
-  assert.deepEqual(pages.flat(), ids)
+test('photo grids preserve full rows, their spacing, and every species within page height', () => {
+  const items = Array.from({ length: 37 }, (_, id) => ({ id, height: 80 }))
+  const pages = packGrid(items, 3, 4, 260, 10)
+  assert.deepEqual(
+    pages.flat(),
+    items.map((item) => item.id),
+  )
   assert.deepEqual(
     pages.map((p) => p.length),
-    [12, 12, 12, 1],
+    [9, 9, 9, 9, 1],
   )
-  assert.deepEqual(packGrid([], 3, 4), [])
+  assert.deepEqual(packGrid([], 3, 4, 260, 10), [])
   assert.deepEqual(
-    packGrid(ids, 1, 1),
-    ids.map((id) => [id]),
+    packGrid(items, 1, 1, 1000, 10),
+    items.map(({ id }) => [id]),
   )
+  const variable = items.map((item) => ({
+    ...item,
+    height: item.id % 5 ? 70 : 110,
+  }))
+  const packed = packGrid(variable, 3, 3, 240, 12)
+  assert.deepEqual(
+    packed.flat(),
+    items.map((item) => item.id),
+  )
+  for (const page of packed) {
+    const heights = []
+    for (let index = 0; index < page.length; index += 3)
+      heights.push(
+        Math.max(
+          ...page.slice(index, index + 3).map((id) => variable[id].height),
+        ),
+      )
+    assert.ok(heights.length <= 3)
+    assert.ok(
+      heights.reduce((sum, height) => sum + height, 0) +
+        (heights.length - 1) * 12 <=
+        240,
+    )
+  }
 })
 test('explicit print grids survive paper, mode, and text-size changes', () => {
   const view = defaults().view
