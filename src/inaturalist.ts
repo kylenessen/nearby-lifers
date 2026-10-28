@@ -1,11 +1,14 @@
 import { boundsOf, GROUPS, insidePolygon, userNames } from './search.ts'
 import type { Search, Point } from './search.ts'
+import { createJsonClient } from './http.ts'
+import { exactTaxonMatch, loadGbif, mapConcurrent, mergeSourceCounts, normalizedName } from './gbif.ts'
+import type { ExternalSummary } from './gbif.ts'
 
 const API_ROOT = 'https://api.inaturalist.org/v1'
 const ALL_GRADES = ['research', 'needs_id', 'casual']
 const MAX_POLYGON_OBSERVATIONS = 10000
 // Space API requests, including parallel searches, below 100 requests per minute.
-let nextRequestAt = 0
+const fetchJson = createJsonClient({ root: API_ROOT, name: 'iNaturalist', interval: 650 })
 
 type ListResponse<T> = { total_results: number; results: T[] }
 export type INatUser = { id: number; login: string; name?: string }
@@ -15,6 +18,8 @@ export type INatTaxon = {
   preferred_common_name?: string
   iconic_taxon_name?: string
   rank_level?: number
+  matched_term?: string
+  is_active?: boolean
   min_species_taxon_id?: number
   ancestor_ids?: number[]
   ancestors?: TaxonAncestor[]
@@ -68,6 +73,10 @@ export type Species = {
   photoUrl?: string
   photoCredit?: string
   observedByUser: boolean
+  inatCount?: number
+  externalCount?: number
+  externalSource?: 'GBIF' | 'eBird'
+  countSource?: 'iNaturalist' | 'GBIF' | 'eBird'
 }
 export type Snapshot = {
   species: Species[]
@@ -77,6 +86,7 @@ export type Snapshot = {
   builtAt: string
   search: Search
   place?: INatPlace
+  external?: ExternalSummary
 }
 type Observation = {
   id: number
@@ -85,32 +95,6 @@ type Observation = {
   quality_grade: string
 }
 
-async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
-  signal?.throwIfAborted()
-  const delay = Math.max(0, nextRequestAt - Date.now())
-  nextRequestAt = Date.now() + delay + 650
-  if (delay)
-    await new Promise<void>((resolve, reject) => {
-      const abort = () => {
-        clearTimeout(timer)
-        reject(signal?.reason)
-      }
-      const timer = setTimeout(() => {
-        signal?.removeEventListener('abort', abort)
-        resolve()
-      }, delay)
-      signal?.addEventListener('abort', abort, { once: true })
-    })
-  signal?.throwIfAborted()
-  const response = await fetch(`${API_ROOT}${path}`, { signal })
-  if (!response.ok)
-    throw new Error(
-      response.status === 429
-        ? 'iNaturalist is busy. Wait a moment and try again.'
-        : `iNaturalist returned ${response.status}. Please try again.`,
-    )
-  return response.json() as Promise<T>
-}
 export async function resolveUser(login: string, signal?: AbortSignal) {
   const data = await fetchJson<ListResponse<INatUser>>(
     `/users/${encodeURIComponent(login.trim())}`,
@@ -266,11 +250,28 @@ export function countPolygonObservations(
   }
   return counts
 }
+export function speciesFromTaxon(taxon: INatTaxon, observedIds: Set<number>): Species {
+  return {
+    id: taxon.id,
+    commonName: taxon.preferred_common_name ?? taxon.name,
+    scientificName: taxon.name,
+    count: 0,
+    casualOnly: false,
+    expectedNearby: false,
+    iconicTaxon: taxon.iconic_taxon_name,
+    family: taxon.ancestors?.find(ancestor => ancestor.rank === 'family'),
+    order: taxon.ancestors?.find(ancestor => ancestor.rank === 'order'),
+    photoUrl: taxon.default_photo?.medium_url ?? taxon.default_photo?.square_url ?? taxon.default_photo?.url,
+    photoCredit: taxon.default_photo?.attribution,
+    observedByUser: observedIds.has(taxon.id),
+  }
+}
 export async function buildSnapshot(
   search: Search,
   label: string,
   signal?: AbortSignal,
   progress?: (message: string) => void,
+  place?: INatPlace,
 ): Promise<Snapshot> {
   progress?.('Finding users and their worldwide life lists.')
   const users = await Promise.all(
@@ -327,32 +328,50 @@ export async function buildSnapshot(
   })()
   const [observed, nearby] = await Promise.all([observedPromise, nearbyPromise])
   const observedIds = new Set(observed.map((t) => t.taxon.id))
+  let species: Species[] = nearby.map(({ taxon, count, nonCasual, expected }) => ({
+    ...speciesFromTaxon(taxon, observedIds), count, casualOnly: nonCasual === 0, expectedNearby: expected,
+  }))
+  let external: ExternalSummary | undefined
+  if (search.source && search.source !== 'inaturalist') {
+    const data = await loadGbif(search, place, signal, progress)
+    const known = new Map<string, INatTaxon[]>()
+    for (const { taxon } of [...observed, ...nearby]) {
+      const name = normalizedName(taxon.name)
+      known.set(name, [...(known.get(name) ?? []), taxon])
+    }
+    let completed = 0
+    const matched = await mapConcurrent(data.rows, async ({ taxon, count }) => {
+      let match = exactTaxonMatch(known.get(normalizedName(taxon.canonicalName)) ?? [], taxon)
+      if (!match) {
+        const params = new URLSearchParams({ q: taxon.canonicalName, rank: 'species', is_active: 'true', per_page: '30' })
+        const candidates = await fetchJson<ListResponse<INatTaxon>>('/taxa?' + params, signal, 24 * 60 * 60 * 1000)
+        match = exactTaxonMatch(candidates.results, taxon)
+      }
+      progress?.(`Matching GBIF species to iNaturalist. ${++completed} of ${data.rows.length.toLocaleString()}.`)
+      return { match, taxon, count }
+    }, signal)
+    // Fetch full iNaturalist taxon details in batches for photos and ancestry.
+    const ids = [...new Set(matched.filter(row => row.match && !row.match.ancestors).map(row => row.match!.id))]
+    const details = new Map<number, INatTaxon>()
+    for (let index = 0; index < ids.length; index += 30) {
+      const batch = ids.slice(index, index + 30)
+      const data = await fetchJson<ListResponse<INatTaxon>>('/taxa/' + batch.join(','), signal, 24 * 60 * 60 * 1000)
+      for (const taxon of data.results) details.set(taxon.id, taxon)
+      if (batch.some(id => !details.has(id))) throw new Error('iNaturalist returned incomplete taxon details. Please try again.')
+    }
+    species = mergeSourceCounts(species, matched.filter(row => row.match).map(row => ({
+      species: speciesFromTaxon(details.get(row.match!.id) ?? row.match!, observedIds), count: row.count,
+    })), data.label)
+    external = {
+      label: data.label,
+      warnings: data.warnings,
+      retrievedAt: data.retrievedAt,
+      unmatched: matched.filter(row => !row.match).map(row => ({ key: row.taxon.key, name: row.taxon.canonicalName, count: row.count })),
+    }
+  }
   return {
-    users,
-    search,
-    observedTotal: observedIds.size,
-    areaLabel: label,
-    builtAt: new Date().toISOString(),
-    species: nearby
-      .map(({ taxon, count, nonCasual, expected }) => ({
-        id: taxon.id,
-        commonName: taxon.preferred_common_name ?? taxon.name,
-        scientificName: taxon.name,
-        count,
-        casualOnly: nonCasual === 0,
-        expectedNearby: expected,
-        iconicTaxon: taxon.iconic_taxon_name,
-        family: taxon.ancestors?.find((ancestor) => ancestor.rank === 'family'),
-        order: taxon.ancestors?.find((ancestor) => ancestor.rank === 'order'),
-        photoUrl:
-          taxon.default_photo?.medium_url ??
-          taxon.default_photo?.square_url ??
-          taxon.default_photo?.url,
-        photoCredit: taxon.default_photo?.attribution,
-        observedByUser: observedIds.has(taxon.id),
-      }))
-      .sort(
-        (a, b) => b.count - a.count || a.commonName.localeCompare(b.commonName),
-      ),
+    users, search, observedTotal: observedIds.size, areaLabel: label,
+    builtAt: new Date().toISOString(), place, external,
+    species: species.sort((a, b) => b.count - a.count || a.commonName.localeCompare(b.commonName)),
   }
 }

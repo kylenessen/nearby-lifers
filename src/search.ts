@@ -54,6 +54,12 @@ export const PAPERS = {
   a6: { label: 'A6', dimensions: '105 × 148 mm', width: 105, height: 148 },
 }
 export type Paper = keyof typeof PAPERS
+export const SOURCES = {
+  inaturalist: 'iNaturalist',
+  ebird: 'iNaturalist + eBird via GBIF',
+  gbif: 'iNaturalist + GBIF, including eBird',
+}
+export type Source = keyof typeof SOURCES
 export type Search = {
   users: string
   area: Area
@@ -61,6 +67,7 @@ export type Search = {
   months: number[]
   groups: string[]
   excludeUserCasual: boolean
+  source: Source
 }
 export type View = {
   hideCasual: boolean
@@ -95,6 +102,7 @@ export function defaults(date = new Date()): Settings {
       ),
       groups: GROUPS.map((g) => g.key),
       excludeUserCasual: false,
+      source: 'inaturalist',
     },
     view: {
       hideCasual: false,
@@ -214,6 +222,8 @@ export function polygonError(points: Point[]) {
   return null
 }
 export function validateSearch(search: Search) {
+  if (!Object.hasOwn(SOURCES, search.source ?? 'inaturalist'))
+    return 'Choose a supported record source.'
   const names = userNames(search.users)
   if (
     !names.length ||
@@ -288,6 +298,7 @@ export function encodeSettings({ search, view }: Settings) {
       .join(','),
   )
   if (search.excludeUserCasual) p.set('user_casual', 'exclude')
+  p.set('source', search.source ?? 'inaturalist')
   if (view.hideCasual) p.set('hide_casual', '1')
   if (view.hideUnexpected) p.set('hide_unexpected', '1')
   if (view.showObserved) p.set('show_observed', '1')
@@ -352,6 +363,7 @@ export function decodeSettings(query: string, date = new Date()): Settings {
     } else throw new Error('The search link has an unknown area type.')
   }
   search.excludeUserCasual = p.get('user_casual') === 'exclude'
+  if (p.has('source')) search.source = p.get('source') as Source
   view.hideCasual = p.get('hide_casual') === '1'
   view.hideUnexpected = p.get('hide_unexpected') === '1'
   view.showObserved = p.get('show_observed') === '1'
