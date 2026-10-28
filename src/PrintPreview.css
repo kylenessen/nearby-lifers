@@ -476,7 +476,7 @@
   line-height: 1.35;
 }
 .contents-entry > span:first-child {
-  max-width: 92mm;
+  max-width: calc(100% - 12mm);
   overflow-wrap: anywhere;
 }
 .contents-dots {
@@ -486,6 +486,23 @@
 .contents-entry strong {
   min-width: 8mm;
   text-align: right;
+}
+.contents-columns {
+  display: grid;
+  grid-template-columns: repeat(var(--contents-columns), minmax(0, 1fr));
+  gap: 5mm;
+}
+.contents-measure-column {
+  width: calc(
+    (var(--paper-width) - 18mm - (var(--contents-columns) - 1) * 5mm) /
+      var(--contents-columns)
+  );
+}
+.density-compact .contents-entry,
+.density-dense .contents-entry {
+  font-size: 7.5pt;
+  padding: 1mm 0;
+  gap: 1mm;
 }
 .booklet-blank {
   justify-content: center;

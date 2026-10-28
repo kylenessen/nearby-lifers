@@ -820,14 +820,12 @@ test('long contents paginate without losing groups or shifting their references'
     .count()
   expect(contentsCount).toBeGreaterThan(1)
   await expect(stack.locator('.contents-entry')).toHaveCount(60)
-  const entries = await stack
-    .locator('.contents-entry')
-    .evaluateAll((rows) =>
-      rows.map((row) => ({
-        key: (row as HTMLElement).dataset.group!,
-        page: Number(row.querySelector('strong')!.textContent),
-      })),
-    )
+  const entries = await stack.locator('.contents-entry').evaluateAll((rows) =>
+    rows.map((row) => ({
+      key: (row as HTMLElement).dataset.group!,
+      page: Number(row.querySelector('strong')!.textContent),
+    })),
+  )
   for (const entry of entries) {
     const slots = await stack
       .locator(`[data-page-kind="content"]:has([data-group="${entry.key}"])`)
@@ -843,4 +841,27 @@ test('long contents paginate without losing groups or shifting their references'
         sheets.some((el) => el.scrollHeight > el.clientHeight + 1),
       ),
   ).toBe(false)
+  await page
+    .getByRole('combobox', { name: 'Density', exact: true })
+    .selectOption('dense')
+  expect(
+    await stack.locator('[data-page-kind="contents"]').count(),
+  ).toBeLessThan(contentsCount)
+  await expect(stack.locator('.contents-entry')).toHaveCount(60)
+  const denseEntries = await stack
+    .locator('.contents-entry')
+    .evaluateAll((rows) =>
+      rows.map((row) => ({
+        key: (row as HTMLElement).dataset.group!,
+        page: Number(row.querySelector('strong')!.textContent),
+      })),
+    )
+  for (const entry of denseEntries) {
+    const slots = await stack
+      .locator(`[data-page-kind="content"]:has([data-group="${entry.key}"])`)
+      .evaluateAll((elements) =>
+        elements.map((el) => Number((el as HTMLElement).dataset.pageNumber)),
+      )
+    expect(entry.page).toBe(Math.min(...slots))
+  }
 })

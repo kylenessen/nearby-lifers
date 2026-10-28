@@ -79,6 +79,7 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
       : ['compact', 'dense'].includes(view.density) && paperKey !== 'a6'
         ? 2
         : 1
+  const contentsColumns = ['compact', 'dense'].includes(view.density) ? 2 : 1
   const measure = useRef<HTMLDivElement>(null)
   const contentsMeasure = useRef<HTMLDivElement>(null)
   const [packed, setPacked] = useState<ListColumn[]>([])
@@ -112,6 +113,7 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
     '--print-columns': columns,
     '--print-rows': rows,
     '--list-columns': listColumns,
+    '--contents-columns': contentsColumns,
   } as CSSProperties
 
   useLayoutEffect(() => {
@@ -152,7 +154,7 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
     setContentsRows(
       packList(rows, capacity, 0).map((column) => column.flatMap((g) => g.ids)),
     )
-  }, [booklet, grouped, groups])
+  }, [booklet, grouped, groups, contentsColumns, view.density])
 
   const pages: Species[][] = []
   for (let i = 0; i < orderedSpecies.length; i += columns * rows)
@@ -161,7 +163,10 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
   for (let i = 0; i < packed.length; i += listColumns)
     listPages.push(packed.slice(i, i + listColumns))
   const pageCount = view.layout === 'grid' ? pages.length : listPages.length
-  const plan = bookletPlan(pageCount, grouped ? contentsRows.length : 0)
+  const contentsPages: number[][][] = []
+  for (let i = 0; i < contentsRows.length; i += contentsColumns)
+    contentsPages.push(contentsRows.slice(i, i + contentsColumns))
+  const plan = bookletPlan(pageCount, grouped ? contentsPages.length : 0)
   const groupFirstPage = new Map<string, number>()
   if (view.layout === 'grid') {
     pages.forEach((page, index) =>
@@ -304,13 +309,15 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
           <div className="print-sheet booklet-contents">
             <h2 className="booklet-page-title">Contents</h2>
             <div className="sheet-body">
-              {groups.map((group) => (
-                <div className="contents-entry" key={group.key}>
-                  <span>{group.label}</span>
-                  <span className="contents-dots" />
-                  <strong>8888</strong>
-                </div>
-              ))}
+              <div className="contents-measure-column">
+                {groups.map((group) => (
+                  <div className="contents-entry" key={group.key}>
+                    <span>{group.label}</span>
+                    <span className="contents-dots" />
+                    <strong>8888</strong>
+                  </div>
+                ))}
+              </div>
             </div>
             {footer(3)}
           </div>
@@ -383,20 +390,26 @@ export function PrintPreview({ snapshot, species, view, visible }: Props) {
                           <h2 className="booklet-page-title">
                             Contents{page.contentsIndex > 0 ? ' continued' : ''}
                           </h2>
-                          <div className="sheet-body">
-                            {contentsRows[page.contentsIndex]?.map((index) => (
-                              <div
-                                className="contents-entry"
-                                data-group={groups[index].key}
-                                key={groups[index].key}
-                              >
-                                <span>{groups[index].label}</span>
-                                <span className="contents-dots" />
-                                <strong>
-                                  {groupFirstPage.get(groups[index].key)}
-                                </strong>
-                              </div>
-                            ))}
+                          <div className="sheet-body contents-columns">
+                            {contentsPages[page.contentsIndex]?.map(
+                              (column, colIndex) => (
+                                <div key={colIndex}>
+                                  {column.map((index) => (
+                                    <div
+                                      className="contents-entry"
+                                      data-group={groups[index].key}
+                                      key={groups[index].key}
+                                    >
+                                      <span>{groups[index].label}</span>
+                                      <span className="contents-dots" />
+                                      <strong>
+                                        {groupFirstPage.get(groups[index].key)}
+                                      </strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              ),
+                            )}
                           </div>
                           {footer(page.number)}
                         </article>
