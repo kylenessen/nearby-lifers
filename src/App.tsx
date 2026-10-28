@@ -16,6 +16,7 @@ import { UsernameField } from './UsernameField'
 import { PrintPreview } from './PrintPreview'
 import { printGrid } from './print-layout'
 import { groupSpecies } from './presentation'
+import { recordDetails, recordLabel } from './gbif'
 import {
   areaLabel,
   decodeSettings,
@@ -24,6 +25,7 @@ import {
   GROUPS,
   MONTHS,
   PAPERS,
+  SOURCES,
   searchKey,
   userNames,
   validateSearch,
@@ -192,6 +194,7 @@ export default function App() {
         label,
         controller.signal,
         setProgress,
+        searchedPlace,
       )
       if (!controller.signal.aborted)
         setSnapshot({ ...result, place: searchedPlace })
@@ -349,8 +352,10 @@ export default function App() {
     () =>
       snapshot?.species.filter(
         (s) =>
-          (!view.hideCasual || !s.casualOnly) &&
-          (!view.hideUnexpected || s.expectedNearby) &&
+          (!view.hideCasual || !s.casualOnly || Boolean(s.externalCount)) &&
+          (!view.hideUnexpected ||
+            s.expectedNearby ||
+            Boolean(s.externalCount)) &&
           (view.showObserved || !s.observedByUser),
       ) ?? [],
     [snapshot, view.hideCasual, view.hideUnexpected, view.showObserved],
@@ -488,6 +493,32 @@ export default function App() {
                   Research Grade and Needs ID always count. Casual observations
                   count unless excluded. Life lists use all dates and locations.
                 </p>
+                <div className="field-section">
+                  <label htmlFor="record-source">Nearby record sources</label>
+                  <select
+                    id="record-source"
+                    value={draft.source}
+                    onChange={(event) =>
+                      setDraft((s) => ({
+                        ...s,
+                        source: event.target.value as typeof s.source,
+                      }))
+                    }
+                  >
+                    {Object.entries(SOURCES).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  {draft.source !== 'inaturalist' && (
+                    <p className="hint">
+                      Life lists and photos stay on iNaturalist. eBird data in
+                      GBIF updates annually. Initial searches may take a few
+                      minutes.
+                    </p>
+                  )}
+                </div>
                 <div className="field-section">
                   <div className="label-row">
                     <label htmlFor="place-search">Search area</label>
@@ -746,6 +777,7 @@ export default function App() {
                       }
                     />
                     Hide nearby casual-only species
+                    {snapshot.external ? ' on iNaturalist' : ''}
                   </label>
                   <label className="checkbox">
                     <input
@@ -756,6 +788,7 @@ export default function App() {
                       }
                     />
                     Only species marked expected nearby
+                    {snapshot.external ? ' on iNaturalist' : ''}
                   </label>
                   <label className="checkbox">
                     <input
@@ -768,6 +801,65 @@ export default function App() {
                     Include already observed species
                   </label>
                 </div>
+                {snapshot.external && (
+                  <div className="source-summary">
+                    <p className="hint">
+                      {SOURCES[snapshot.search.source]}. Counts show the larger
+                      source count for each species. Source totals are not
+                      added. The quality and expected-range filters apply to
+                      iNaturalist records. GBIF records remain eligible. GBIF
+                      results may be cached for up to one hour in this tab.
+                    </p>
+                    {snapshot.external.warnings.map((warning) => (
+                      <p className="hint" key={warning}>
+                        {warning}
+                      </p>
+                    ))}
+                    {snapshot.external.unmatched.length > 0 && (
+                      <details className="notice">
+                        <summary>
+                          {snapshot.external.unmatched.length} GBIF taxa need
+                          review and are excluded from the guide
+                        </summary>
+                        <p>
+                          These names could not be confidently matched to
+                          iNaturalist for checking your life list.
+                        </p>
+                        <ul>
+                          {snapshot.external.unmatched.map((taxon) => (
+                            <li key={taxon.key}>
+                              <a
+                                href={`https://www.gbif.org/species/${taxon.key}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {taxon.name}
+                              </a>{' '}
+                              · {taxon.count.toLocaleString()} records
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    <p className="hint">
+                      <a
+                        href="https://www.gbif.org/"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        GBIF data
+                      </a>{' '}
+                      ·{' '}
+                      <a
+                        href="https://www.gbif.org/dataset/4fa7b334-ce0d-4e88-aaae-2e0c138d049e"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        eBird dataset
+                      </a>
+                    </p>
+                  </div>
+                )}
                 <div className="view-toolbar">
                   <span className="hint">{visible.length} species shown</span>
                   <div className="segmented" aria-label="List format">
@@ -1049,9 +1141,9 @@ export default function App() {
                           )}
                           <span
                             className="count-pill"
-                            title="Reported observations in this area and selected months"
+                            title={recordDetails(species)}
                           >
-                            {species.count.toLocaleString()} records
+                            {recordLabel(species)}
                           </span>
                           {species.observedByUser && (
                             <span className="seen-pill">
@@ -1079,11 +1171,20 @@ export default function App() {
                             <i>{species.scientificName}</i>
                           </p>
                           <div className="species-tags">
-                            {species.casualOnly && <span>Casual only</span>}
-                            {!species.expectedNearby && (
-                              <span>Range uncertain</span>
+                            {species.casualOnly && !species.externalCount && (
+                              <span>Casual only</span>
                             )}
+                            {!species.expectedNearby &&
+                              !species.externalCount && (
+                                <span>Range uncertain</span>
+                              )}
                           </div>
+                          {species.externalCount && (
+                            <details className="photo-credit">
+                              <summary>Record sources</summary>
+                              {recordDetails(species)}
+                            </details>
+                          )}
                           {species.photoCredit && (
                             <details className="photo-credit">
                               <summary>Photo credit</summary>
@@ -1131,8 +1232,11 @@ export default function App() {
                                 </a>
                                 <i>{s.scientificName}</i>
                               </div>
-                              <span className="record-count">
-                                {s.count} records
+                              <span
+                                className="record-count"
+                                title={recordDetails(s)}
+                              >
+                                {recordLabel(s)}
                               </span>
                             </li>
                           ))}

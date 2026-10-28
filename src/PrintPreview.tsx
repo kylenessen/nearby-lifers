@@ -2,6 +2,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { MONTHS, PAPERS } from './search'
 import { groupSpecies } from './presentation'
+import { recordDetails, recordLabel } from './gbif'
+import { SOURCES } from './search'
 import { bookletPlan } from './booklet'
 import { BookletBack, BookletParameters } from './BookletDetails'
 import type { View } from './search'
@@ -51,6 +53,9 @@ function Header({
           : 'Life list includes all quality grades'}
         {view.hideCasual ? ' · No casual-only targets' : ''}
         {view.hideUnexpected ? ' · Expected nearby' : ''}
+        {snapshot.external
+          ? ` · ${SOURCES[snapshot.search.source]}. Larger source count shown. iNaturalist filters only.`
+          : ''}
       </p>
     </header>
   )
@@ -104,12 +109,8 @@ function PrintCard({
               }}
             />
           )}
-          <span
-            className="print-records"
-            title="Records in the selected area and months"
-          >
-            {species.count.toLocaleString()}{' '}
-            {species.count === 1 ? 'record' : 'records'}
+          <span className="print-records" title={recordDetails(species)}>
+            {recordLabel(species)}
           </span>
         </div>
       </div>

@@ -568,3 +568,7 @@
 .booklet-print-instructions p {
   margin: 0;
 }
+
+.booklet-parameters-page:has(.external-source-filter) .print-map-canvas {
+  height: 30mm;
+}

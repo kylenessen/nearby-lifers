@@ -995,8 +995,8 @@ test('long contents paginate without losing groups or shifting their references'
         line: parseFloat(getComputedStyle(header).lineHeight),
         overlaps:
           header.getBoundingClientRect().bottom >
-          header.parentElement!
-            .querySelector('.print-grid')!
+          header
+            .parentElement!.querySelector('.print-grid')!
             .getBoundingClientRect().top,
       })),
     )
@@ -1005,9 +1005,11 @@ test('long contents paginate without losing groups or shifting their references'
     true,
   )
   expect(wrappedHeaders.some((header) => header.overlaps)).toBe(false)
-  const photoHeights = await stack.locator('.print-photo').evaluateAll((photos) =>
-    photos.map((photo) => photo.getBoundingClientRect().height),
-  )
+  const photoHeights = await stack
+    .locator('.print-photo')
+    .evaluateAll((photos) =>
+      photos.map((photo) => photo.getBoundingClientRect().height),
+    )
   expect(Math.max(...photoHeights) - Math.min(...photoHeights)).toBeLessThan(1)
 })
 
@@ -1439,4 +1441,188 @@ test('detailed polygon filters stay on one page with all settings at nine points
   await expect(
     page.getByRole('button', { name: 'Print or save PDF' }),
   ).toBeEnabled()
+})
+
+async function mockExternalSources(page: Page, fail = false) {
+  await mockApi(page)
+  const requests: URL[] = []
+  const taxa = [
+    {
+      ...species[0].taxon,
+      id: 80,
+      name: 'Corvus brachyrhynchos',
+      preferred_common_name: 'American Crow',
+    },
+    {
+      ...species[1].taxon,
+      id: 81,
+      name: 'Bucephala albeola',
+      preferred_common_name: 'Bufflehead',
+    },
+    {
+      ...species[2].taxon,
+      id: 82,
+      name: 'Anas platyrhynchos',
+      preferred_common_name: 'Mallard',
+    },
+  ]
+  await page.route(
+    'https://api.inaturalist.org/v1/observations/species_counts**',
+    (route) => {
+      const u = new URL(route.request().url())
+      const results = u.searchParams.has('user_id')
+        ? [{ count: 1, taxon: taxa[0] }]
+        : [{ count: 20, taxon: taxa[1] }]
+      return route.fulfill({ json: { total_results: results.length, results } })
+    },
+  )
+  await page.route('https://api.inaturalist.org/v1/taxa**', (route) => {
+    const u = new URL(route.request().url())
+    const results = taxa.filter((t) => t.name === u.searchParams.get('q'))
+    return route.fulfill({ json: { total_results: results.length, results } })
+  })
+  let attempted = false
+  await page.route('https://api.gbif.org/v1/**', (route) => {
+    const u = new URL(route.request().url())
+    requests.push(u)
+    if (u.pathname.endsWith('/species/match'))
+      return route.fulfill({ json: { usageKey: 212, matchType: 'EXACT' } })
+    if (u.pathname.endsWith('/occurrence/search')) {
+      if (fail) return route.fulfill({ status: 400, body: 'Unavailable' })
+      if (!attempted) {
+        attempted = true
+        return route.fulfill({ status: 503, body: 'Busy' })
+      }
+      return route.fulfill({
+        json: {
+          count: 185,
+          facets: [
+            {
+              field: 'SPECIES_KEY',
+              counts:
+                u.searchParams.get('facetOffset') === '0'
+                  ? [
+                      { name: '101', count: 100 },
+                      { name: '102', count: 50 },
+                      { name: '103', count: 30 },
+                      { name: '104', count: 5 },
+                    ]
+                  : [],
+            },
+          ],
+        },
+      })
+    }
+    const key = Number(u.pathname.split('/').pop())
+    return route.fulfill({
+      json: {
+        key,
+        canonicalName: taxa[key - 101]?.name ?? 'Unmatched bird',
+        rank: 'SPECIES',
+        class: 'Aves',
+      },
+    })
+  })
+  return requests
+}
+
+test('GBIF sources restore from URLs, retry, preserve photos and life lists, and print without duplicate totals', async ({
+  page,
+}) => {
+  const requests = await mockExternalSources(page)
+  const settings = defaults()
+  settings.search.source = 'ebird'
+  settings.search.groups = ['birds']
+  settings.view.hideCasual = true
+  settings.view.hideUnexpected = true
+  settings.view.printMode = 'booklet'
+  await page.goto(`/?${encodeSettings(settings)}`)
+  await expect(page.getByLabel('Nearby record sources')).toHaveValue('ebird')
+  await expect(page.locator('.species-card')).toHaveCount(2)
+  await expect(
+    page.locator('.species-card').filter({ hasText: 'American Crow' }),
+  ).toHaveCount(0)
+  const duck = page.locator('.species-card').filter({ hasText: 'Bufflehead' })
+  await expect(duck.locator('.count-pill')).toHaveText('50 eBird records')
+  await duck.getByText('Record sources', { exact: true }).click()
+  await expect(duck).toContainText('20 iNaturalist records. 50 eBird records.')
+  await expect(duck.locator('img')).toHaveAttribute('src', /example.test/)
+  await expect(
+    page.getByText('1 GBIF taxa need review and are excluded from the guide'),
+  ).toBeVisible()
+  await expect(page.locator('.source-summary')).toContainText(
+    'larger source count',
+  )
+  const queries = requests.filter((u) =>
+    u.pathname.endsWith('/occurrence/search'),
+  )
+  expect(queries.length).toBe(3)
+  expect(
+    queries.every(
+      (u) =>
+        u.searchParams.get('datasetKey') ===
+        '4fa7b334-ce0d-4e88-aaae-2e0c138d049e',
+    ),
+  ).toBe(true)
+  await page.getByRole('button', { name: 'Print options', exact: true }).click()
+  const filters = page.locator('.booklet-stack .booklet-parameters-page')
+  await expect(filters).toContainText('iNaturalist + eBird via GBIF')
+  await expect(filters).toContainText('Larger source count shown')
+  expect(
+    await filters.evaluate((el) => el.scrollHeight > el.clientHeight + 1),
+  ).toBe(false)
+  expect(
+    await filters.evaluate(
+      (el) =>
+        el.querySelector('.booklet-print-instructions')!.getBoundingClientRect()
+          .bottom >
+        el.querySelector('.sheet-footer')!.getBoundingClientRect().top,
+    ),
+  ).toBe(false)
+  await expect(page.locator('.booklet-stack .print-card')).toHaveCount(2)
+  await filters.screenshot({ path: 'test-results/gbif-search-filters.png' })
+  const before = requests.length
+  await page.getByLabel('Nearby record sources').selectOption('inaturalist')
+  await page
+    .getByRole('button', { name: 'Find nearby lifers', exact: true })
+    .click()
+  await expect(page.locator('.species-card')).toHaveCount(1)
+  expect(new URL(page.url()).searchParams.get('source')).toBe('inaturalist')
+  expect(requests.length).toBe(before)
+  await page.goBack()
+  await expect(page.locator('.species-card')).toHaveCount(2)
+  await expect(page.getByLabel('Nearby record sources')).toHaveValue('ebird')
+  expect(requests.length).toBe(before)
+  await page.getByLabel('Nearby record sources').selectOption('gbif')
+  await page
+    .getByRole('button', { name: 'Find nearby lifers', exact: true })
+    .click()
+  await expect(page.locator('.count-pill').first()).toContainText(
+    'GBIF records',
+  )
+  expect(
+    requests
+      .slice(before)
+      .filter((u) => u.pathname.endsWith('/occurrence/search'))
+      .every((u) => !u.searchParams.has('datasetKey')),
+  ).toBe(true)
+  expect(new URL(page.url()).searchParams.get('source')).toBe('gbif')
+})
+
+test('a failed selected GBIF source never silently becomes an iNaturalist-only guide', async ({
+  page,
+}) => {
+  const requests = await mockExternalSources(page, true)
+  const settings = defaults()
+  settings.search.source = 'gbif'
+  settings.search.groups = ['birds']
+  await page.goto(`/?${encodeSettings(settings)}`)
+  await expect(page.getByRole('alert')).toContainText('GBIF could not finish')
+  await expect(page.locator('.species-card')).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Print options', exact: true }),
+  ).toBeDisabled()
+  expect(
+    requests.filter((u) => u.pathname.endsWith('/occurrence/search')).length,
+  ).toBe(1)
 })

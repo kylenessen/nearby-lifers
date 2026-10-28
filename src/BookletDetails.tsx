@@ -1,4 +1,4 @@
-import { GROUPS, MONTHS } from './search'
+import { GROUPS, MONTHS, SOURCES } from './search'
 import type { View } from './search'
 import type { Snapshot } from './inaturalist'
 import { PUBLIC_SITE_URL, qrGraphic } from './qr'
@@ -73,7 +73,18 @@ export function BookletParameters({
       }),
     ],
     ['Username', snapshot.users.map((u) => `@${u.login}`).join(', ')],
-    ['Area', `${snapshot.areaLabel}. ${areaDetails}`],
+    ...(snapshot.external
+      ? [
+          [
+            'Sources',
+            `${SOURCES[search.source]}. Larger source count shown. Life list and photos from iNaturalist. ${snapshot.external.unmatched.length} unmatched taxa excluded.`,
+          ],
+        ]
+      : []),
+    [
+      'Area',
+      `${snapshot.areaLabel}. ${areaDetails}${snapshot.external?.boundaryTolerance ? `. GBIF outline simplified with about ${snapshot.external.boundaryTolerance} m tolerance.` : ''}`,
+    ],
     [
       'Months',
       `${search.months
@@ -94,7 +105,7 @@ export function BookletParameters({
     ],
     [
       'Nearby filters',
-      `${view.hideCasual ? 'Casual-only species hidden' : 'Casual-only species included'}. ${view.hideUnexpected ? 'Expected nearby only' : 'Any expected range'}.`,
+      `${view.hideCasual ? 'Casual-only species hidden' : 'Casual-only species included'}. ${view.hideUnexpected ? 'Expected nearby only' : 'Any expected range'}.${snapshot.external ? ' iNaturalist only. GBIF records remain eligible.' : ''}`,
     ],
     [
       'Already observed',
@@ -121,7 +132,9 @@ export function BookletParameters({
   return (
     <>
       <PrintMap snapshot={snapshot} />
-      <dl className="booklet-parameters">
+      <dl
+        className={`booklet-parameters ${snapshot.external ? 'external-source-filter' : ''}`}
+      >
         {parameters.map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
