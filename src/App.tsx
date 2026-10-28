@@ -313,7 +313,6 @@ export default function App() {
   )
   const groups = useMemo(() => sortedSpecies(visible), [visible])
   const found = snapshot?.species.filter((s) => s.observedByUser).length ?? 0
-  const targetCount = visible.filter((s) => !s.observedByUser).length
   const selectedAreaLabel =
     draft.area.kind === 'place' && place?.id === draft.area.id
       ? (place.display_name ?? place.name)
@@ -378,14 +377,6 @@ export default function App() {
             Powered by iNaturalist <ExternalLink size={13} />
           </a>
         </header>
-        <section className="intro">
-          <p className="eyebrow">A little direction for your next outing</p>
-          <h1>What’s still out there?</h1>
-          <p>
-            Find species reported nearby that you haven’t observed yet. Save a
-            search as a link, or take a checklist into the field.
-          </p>
-        </section>
         <div className="workspace">
           <section className="search-panel" aria-labelledby="search-title">
             <div className="section-heading">
@@ -416,7 +407,7 @@ export default function App() {
                   if (!drawing) submitSearch()
                 }}
               >
-                <label htmlFor="users">iNaturalist usernames</label>
+                <label htmlFor="users">Username</label>
                 <input
                   id="users"
                   value={draft.users}
@@ -428,10 +419,6 @@ export default function App() {
                   autoCapitalize="none"
                   required
                 />
-                <p className="hint">
-                  Separate users with commas. Species observed by any listed
-                  user count as already seen.
-                </p>
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -620,26 +607,10 @@ export default function App() {
                   )}
                   {loading ? 'Restart search' : 'Find nearby lifers'}
                 </button>
-                <p className="hint bookmark-hint">
-                  Run your search to update the URL. Bookmark it or add it to
-                  your home screen to return to the same settings. Results
-                  refresh when you open it.
-                </p>
               </form>
             )}
           </section>
-          <main className="results-panel" id="results">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Your field list</p>
-                <h2>
-                  {snapshot
-                    ? `${targetCount.toLocaleString()} potential lifers`
-                    : 'Let’s see what’s nearby'}
-                </h2>
-              </div>
-              <span className="step-label">02</span>
-            </div>
+          <main className="results-panel" id="results" aria-label="Search results">
             <div className="result-actions">
               <button
                 type="button"
@@ -707,7 +678,7 @@ export default function App() {
                   {found.toLocaleString()} nearby species already observed.
                   Compared with {snapshot.observedTotal.toLocaleString()}{' '}
                   species across {snapshot.users.map((u) => u.login).join(', ')}
-                  . Identifications must be at species level or below.
+                  .
                 </p>
                 <div className="result-filters">
                   <label className="checkbox">
@@ -947,10 +918,6 @@ export default function App() {
           </main>
         </div>
         <footer className="site-footer">
-          <p>
-            Made for curious naturalists. Reported records are a starting point,
-            not a promise of a sighting.
-          </p>
           <a
             href="#top"
             onClick={(event) => {

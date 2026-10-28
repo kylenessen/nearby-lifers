@@ -89,7 +89,7 @@ async function load(page: Page) {
   await mockApi(page)
   await page.goto('/')
   await expect(
-    page.getByRole('heading', { name: '42 potential lifers' }),
+    page.getByText('42 species shown', { exact: true }),
   ).toBeVisible()
 }
 
@@ -111,7 +111,7 @@ test('bookmarks restore all search inputs and presentation without local storage
   }
   await page.goto(`/?${encodeSettings(settings)}`)
   await expect(
-    page.getByRole('heading', { name: '41 potential lifers' }),
+    page.getByText('41 species shown', { exact: true }),
   ).toBeVisible()
   await expect(
     page.getByLabel('Exclude users’ casual observations'),
@@ -131,7 +131,7 @@ test('bookmarks restore all search inputs and presentation without local storage
   )
   await page.reload()
   await expect(
-    page.getByRole('heading', { name: '41 potential lifers' }),
+    page.getByText('41 species shown', { exact: true }),
   ).toBeVisible()
   expect(
     await page.evaluate(() => localStorage.length + sessionStorage.length),
@@ -147,29 +147,29 @@ test('browser back and forward rebuild previous searches and pending settings ca
 }) => {
   await load(page)
   const original = page.url()
-  await page.getByLabel('iNaturalist usernames').fill('another-user')
+  await page.getByLabel('Username', { exact: true }).fill('another-user')
   await expect(
     page.getByRole('button', { name: 'Copy search link' }),
   ).toBeDisabled()
   await page.getByRole('button', { name: 'Find nearby lifers' }).click()
   await expect(
-    page.getByRole('heading', { name: '42 potential lifers' }),
+    page.getByText('42 species shown', { exact: true }),
   ).toBeVisible()
   expect(new URL(page.url()).searchParams.get('users')).toBe('another-user')
   await page.goBack()
-  await expect(page.getByLabel('iNaturalist usernames')).toHaveValue(
+  await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
     'kylenessen',
   )
   await expect(
-    page.getByRole('heading', { name: '42 potential lifers' }),
+    page.getByText('42 species shown', { exact: true }),
   ).toBeVisible()
   expect(page.url()).toBe(original)
   await page.goForward()
-  await expect(page.getByLabel('iNaturalist usernames')).toHaveValue(
+  await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
     'another-user',
   )
   await expect(
-    page.getByRole('heading', { name: '42 potential lifers' }),
+    page.getByText('42 species shown', { exact: true }),
   ).toBeVisible()
 })
 
@@ -338,13 +338,13 @@ test('mobile bookmarks open directly to results with editable search settings', 
   await mockApi(page)
   await page.goto(`/?${encodeSettings(defaults())}`)
   await expect(
-    page.getByRole('heading', { name: '42 potential lifers' }),
+    page.getByText('42 species shown', { exact: true }),
   ).toBeInViewport()
   await expect(
     page.getByRole('button', { name: 'Edit search', exact: true }),
   ).toHaveAttribute('aria-expanded', 'false')
   await page.getByRole('button', { name: 'Edit search', exact: true }).click()
-  await expect(page.getByLabel('iNaturalist usernames')).toHaveValue(
+  await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
     'kylenessen',
   )
   await expect(page.locator('.map-preview')).toBeVisible()

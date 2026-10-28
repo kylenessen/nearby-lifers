@@ -28,33 +28,8 @@
   text-decoration: none;
   color: var(--muted);
 }
-.intro {
-  max-width: 720px;
-  padding: 43px 0 35px;
-}
-.eyebrow {
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 1.3px;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 10px;
-}
-h1 {
-  font-family: Georgia, serif;
-  font-size: clamp(36px, 4.5vw, 56px);
-  font-weight: 500;
-  letter-spacing: -1.8px;
-  line-height: 1.1;
-  margin-bottom: 16px;
-}
-.intro > p:last-child {
-  color: var(--muted);
-  font-size: 16px;
-  max-width: 590px;
-  margin-bottom: 0;
-}
 .workspace {
+  margin-top: 24px;
   display: grid;
   grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
   gap: 38px;
@@ -78,16 +53,6 @@ h1 {
   font-weight: 650;
   letter-spacing: -0.6px;
   margin: 0;
-}
-.results-panel > .section-heading h2 {
-  font-size: 29px;
-  font-family: Georgia, serif;
-  font-weight: 500;
-}
-.step-label {
-  color: #98a58d;
-  font-family: Georgia, serif;
-  font-size: 21px;
 }
 .hint {
   font-size: 12px;
@@ -281,9 +246,6 @@ fieldset legend {
   margin-top: 24px;
   min-height: 46px;
   font-size: 14px;
-}
-.bookmark-hint {
-  margin: 12px 0 0;
 }
 .results-panel {
   padding: 10px 0;
@@ -567,9 +529,6 @@ fieldset legend {
   font-size: 11px;
   color: var(--muted);
 }
-.site-footer p {
-  margin: 0;
-}
 .site-footer a {
   flex-shrink: 0;
   display: flex;
@@ -611,15 +570,6 @@ fieldset legend {
     font-size: 10px;
     max-width: 100px;
     line-height: 1.4;
-  }
-  .intro {
-    padding: 30px 0 26px;
-  }
-  .intro .eyebrow {
-    font-size: 9px;
-  }
-  .intro p:last-child {
-    font-size: 14px;
   }
   .workspace {
     display: block;

@@ -254,7 +254,7 @@ export function LocationMap({
 
   const hint =
     mode === 'browse'
-      ? 'Drag to explore. Choose a tool to change the search area.'
+      ? ''
       : mode === 'circle'
         ? 'Tap the map to set the center of your radius.'
         : mode === 'rectangle'
@@ -291,7 +291,7 @@ export function LocationMap({
         aria-label="Search area map. Use arrow keys to pan and Enter to place a corner while drawing."
       />
       <div className="map-instructions">
-        <p aria-live="polite">{hint}</p>
+        {hint && <p aria-live="polite">{hint}</p>}
         {mode !== 'browse' && (
           <div className="button-row">
             {mode === 'polygon' && (
