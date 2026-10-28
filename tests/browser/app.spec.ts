@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { defaults, encodeSettings, PAPERS } from '../../src/search'
+import { gridShape } from '../../src/print-layout'
+import type { Paper, View } from '../../src/search'
 
 const names = [
   'Bufflehead',
@@ -61,7 +63,7 @@ const species = Array.from({ length: 45 }, (_, i) => ({
       },
     ],
     default_photo: {
-      medium_url: 'https://example.test/photo.svg',
+      medium_url: `https://example.test/photo-${i % 3}.svg`,
       attribution:
         '(c) A naturalist with a moderately long name, some rights reserved (CC BY-NC)',
     },
@@ -69,12 +71,17 @@ const species = Array.from({ length: 45 }, (_, i) => ({
 }))
 async function mockApi(page: Page) {
   const requests: URL[] = []
-  await page.route('https://example.test/**', (route) =>
-    route.fulfill({
+  await page.route('https://example.test/**', (route) => {
+    const [width, height] = route.request().url().includes('photo-1')
+      ? [450, 300]
+      : route.request().url().includes('photo-2')
+        ? [200, 400]
+        : [300, 300]
+    return route.fulfill({
       contentType: 'image/svg+xml',
-      body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="#bfcec0"/><circle cx="150" cy="150" r="65" fill="#6a8165"/></svg>',
-    }),
-  )
+      body: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#bfcec0"/><circle cx="${width / 2}" cy="${height / 2}" r="65" fill="#6a8165"/></svg>`,
+    })
+  })
   await page.route('https://server.arcgisonline.com/**', (route) =>
     route.abort(),
   )
@@ -330,8 +337,17 @@ for (const layout of ['grid', 'list'] as const) {
           .getByRole('combobox', { name: 'Paper size', exact: true })
           .selectOption(paper)
         await page
-          .getByRole('combobox', { name: 'Density', exact: true })
+          .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
           .selectOption(density)
+        if (layout === 'grid') {
+          const shape = gridShape(paper as Paper, density as View['density'])
+          await page
+            .getByLabel('Columns per page', { exact: true })
+            .fill(String(shape.columns))
+          await page
+            .getByLabel('Rows per page', { exact: true })
+            .fill(String(shape.rows))
+        }
         const output = page.locator('.sheet-stack')
         await expect(
           output.locator(layout === 'grid' ? '.print-card' : '.print-list-row'),
@@ -362,11 +378,11 @@ for (const layout of ['grid', 'list'] as const) {
               )
                 errors.push('photo too small')
               if (format === 'grid') {
-                const photo = item
-                  .querySelector('.print-photo')!
-                  .getBoundingClientRect()
-                if (Math.abs(photo.width - photo.height) > 1)
-                  errors.push('photo is not square')
+                if (
+                  getComputedStyle(item.querySelector('.print-photo img')!)
+                    .objectFit !== 'contain'
+                )
+                  errors.push('photo is cropped or stretched')
               }
             }
           }
@@ -398,7 +414,7 @@ for (const layout of ['grid', 'list'] as const) {
       .getByRole('combobox', { name: 'Paper size', exact: true })
       .selectOption('a6')
     await page
-      .getByRole('combobox', { name: 'Density', exact: true })
+      .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
       .selectOption('comfortable')
     await page
       .locator('.sheet-stack .print-sheet')
@@ -482,13 +498,13 @@ test('taxonomic grouping, all sort modes, and dense presentation survive a bookm
   ).map(Number.parseFloat)
   expect(counts).toEqual([...counts].sort((a, b) => b - a))
   await page
-    .getByRole('combobox', { name: 'Density', exact: true })
+    .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
     .selectOption('dense')
   const denseHeight = await page
     .locator('.taxon-checklist')
     .evaluate((el) => el.getBoundingClientRect().height)
   await page
-    .getByRole('combobox', { name: 'Density', exact: true })
+    .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
     .selectOption('compact')
   expect(
     await page
@@ -496,14 +512,14 @@ test('taxonomic grouping, all sort modes, and dense presentation survive a bookm
       .evaluate((el) => el.getBoundingClientRect().height),
   ).toBeGreaterThan(denseHeight)
   await page
-    .getByRole('combobox', { name: 'Density', exact: true })
+    .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
     .selectOption('dense')
   await page.reload()
   await expect(
     page.getByText('42 species shown', { exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByRole('combobox', { name: 'Density', exact: true }),
+    page.getByRole('combobox', { name: /^(Density|Photo grid text size)$/ }),
   ).toHaveValue('dense')
   await expect(
     page.getByRole('combobox', { name: 'Group by', exact: true }),
@@ -532,7 +548,7 @@ for (const layout of ['grid', 'list'] as const) {
       .getByRole('combobox', { name: 'Paper size', exact: true })
       .selectOption('a6')
     await page
-      .getByRole('combobox', { name: 'Density', exact: true })
+      .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
       .selectOption('dense')
     await page
       .getByRole('combobox', { name: 'Print as', exact: true })
@@ -872,7 +888,7 @@ test('long contents paginate without losing groups or shifting their references'
       ),
   ).toBe(false)
   await page
-    .getByRole('combobox', { name: 'Density', exact: true })
+    .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
     .selectOption('dense')
   expect(
     await stack.locator('[data-page-kind="contents"]').count(),
@@ -896,7 +912,7 @@ test('long contents paginate without losing groups or shifting their references'
   }
 })
 
-test('booklet photo controls preserve square frames, group colors, and physical-sheet warnings', async ({
+test('booklet photo controls preserve photo proportions, group colors, and physical-sheet warnings', async ({
   page,
 }) => {
   const requests = await mockApi(page)
@@ -921,8 +937,15 @@ test('booklet photo controls preserve square frames, group colors, and physical-
   ).length
   for (const density of ['dense', 'compact', 'comfortable', 'large']) {
     await page
-      .getByRole('combobox', { name: 'Density', exact: true })
+      .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
       .selectOption(density)
+    const shape = gridShape('half', density as View['density'])
+    await page
+      .getByLabel('Columns per page', { exact: true })
+      .fill(String(shape.columns))
+    await page
+      .getByLabel('Rows per page', { exact: true })
+      .fill(String(shape.rows))
     for (const showCredits of [false, true]) {
       await credits.setChecked(showCredits)
       await expect(stack.locator('.print-credit')).toHaveCount(
@@ -935,8 +958,11 @@ test('booklet photo controls preserve square frames, group colors, and physical-
           const photo = card
             .querySelector('.print-photo')!
             .getBoundingClientRect()
-          if (Math.abs(photo.width - photo.height) > 1)
-            errors.push('non-square photo')
+          if (
+            getComputedStyle(card.querySelector('.print-photo img')!)
+              .objectFit !== 'contain'
+          )
+            errors.push('photo is cropped or stretched')
           const body = card.closest('.sheet-body')!.getBoundingClientRect()
           if (
             card.getBoundingClientRect().bottom > body.bottom + 1 ||
@@ -1007,9 +1033,131 @@ test('booklet photo controls preserve square frames, group colors, and physical-
   )
   await credits.uncheck()
   await page
-    .getByRole('combobox', { name: 'Density', exact: true })
+    .getByRole('combobox', { name: /^(Density|Photo grid text size)$/ })
     .selectOption('dense')
   await stack
     .locator('[data-content-index="0"]')
-    .screenshot({ path: 'test-results/booklet-square-photos.png' })
+    .screenshot({ path: 'test-results/booklet-fitted-photos.png' })
+})
+
+test('custom booklet grids fill pages, preserve photos, and mirror the spine margin', async ({
+  page,
+}) => {
+  const requests = await mockApi(page)
+  const settings = defaults()
+  settings.view.printMode = 'booklet'
+  settings.view.density = 'compact'
+  settings.view.bookletTitle = 'Morro Bay field guide'
+  await page.goto(`/?${encodeSettings(settings)}`)
+  await page.getByRole('button', { name: 'Print options', exact: true }).click()
+  const columns = page.getByLabel('Columns per page', { exact: true })
+  const rows = page.getByLabel('Rows per page', { exact: true })
+  const textSize = page.getByRole('combobox', {
+    name: 'Photo grid text size',
+    exact: true,
+  })
+  const stack = page.locator('.booklet-stack')
+  await expect(stack.locator('.print-card')).toHaveCount(42)
+  const searchRequests = requests.filter((r) =>
+    r.pathname.includes('/observations'),
+  ).length
+  for (const [cols, rowCount, size] of [
+    [3, 4, 'compact'],
+    [2, 4, 'large'],
+    [4, 4, 'dense'],
+    [1, 2, 'comfortable'],
+  ] as const) {
+    await columns.fill(String(cols))
+    await rows.fill(String(rowCount))
+    await textSize.selectOption(size)
+    await expect(columns).toHaveValue(String(cols))
+    await expect(rows).toHaveValue(String(rowCount))
+    await expect(page.locator('.grid-warning')).toHaveCount(0)
+    await expect(
+      page.getByRole('button', { name: 'Print or save PDF' }),
+    ).toBeEnabled()
+    const pages = await stack
+      .locator('[data-content-index]')
+      .evaluateAll((sheets) =>
+        sheets
+          .map((sheet) => {
+            const body = sheet
+              .querySelector('.print-grid')!
+              .getBoundingClientRect()
+            const cards = Array.from(
+              sheet.querySelectorAll<HTMLElement>('.print-card'),
+            )
+            const slot = sheet.closest('.booklet-slot')!
+            const pageBox = sheet.getBoundingClientRect()
+            const leftPage = slot === slot.parentElement!.firstElementChild
+            return {
+              index: Number((sheet as HTMLElement).dataset.contentIndex),
+              ids: cards.map((c) => Number(c.dataset.speciesId)),
+              bottomGap:
+                body.bottom -
+                cards[cards.length - 1].getBoundingClientRect().bottom,
+              innerMargin: leftPage
+                ? pageBox.right - body.right
+                : body.left - pageBox.left,
+              outerMargin: leftPage
+                ? body.left - pageBox.left
+                : pageBox.right - body.right,
+              heights: cards.map((c) => c.getBoundingClientRect().height),
+              overflow: cards.some((c) => c.scrollHeight > c.clientHeight + 1),
+              fits: cards.every(
+                (c) =>
+                  getComputedStyle(c.querySelector('img')!).objectFit ===
+                  'contain',
+              ),
+            }
+          })
+          .sort((a, b) => a.index - b.index),
+      )
+    expect(new Set(pages.flatMap((p) => p.ids)).size).toBe(42)
+    for (const p of pages.slice(0, -1)) {
+      expect(p.ids).toHaveLength(cols * rowCount)
+      expect(Math.abs(p.bottomGap)).toBeLessThan(1)
+    }
+    for (const p of pages) {
+      expect(p.overflow).toBe(false)
+      expect(p.fits).toBe(true)
+      expect(Math.max(...p.heights) - Math.min(...p.heights)).toBeLessThan(1)
+      expect((p.innerMargin * 25.4) / 96).toBeCloseTo(14, 1)
+      expect((p.outerMargin * 25.4) / 96).toBeCloseTo(9, 1)
+    }
+  }
+  await columns.fill('8')
+  await rows.fill('8')
+  await expect(page.locator('.grid-warning')).toContainText('too little room')
+  await expect(
+    page.getByRole('button', { name: 'Print or save PDF' }),
+  ).toBeDisabled()
+  await columns.fill('3')
+  await rows.fill('4')
+  await textSize.selectOption('compact')
+  await expect(page.locator('.grid-warning')).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Print or save PDF' }),
+  ).toBeEnabled()
+  expect(
+    requests.filter((r) => r.pathname.includes('/observations')).length,
+  ).toBe(searchRequests)
+  expect(new URL(page.url()).searchParams.get('columns')).toBe('3')
+  expect(new URL(page.url()).searchParams.get('rows')).toBe('4')
+  await page.reload()
+  await page.getByRole('button', { name: 'Print options', exact: true }).click()
+  await expect(columns).toHaveValue('3')
+  await expect(rows).toHaveValue('4')
+  await expect(stack.locator('.print-card')).toHaveCount(42)
+  await stack
+    .locator('[data-content-index="0"]')
+    .screenshot({ path: 'test-results/booklet-custom-grid.png' })
+  const sides = await stack.locator('.booklet-side').count()
+  await page.emulateMedia({ media: 'print' })
+  const pdf = await page.pdf({
+    path: 'test-results/booklet-custom-grid.pdf',
+    preferCSSPageSize: true,
+    printBackground: true,
+  })
+  expect(pdf.toString('latin1').match(/\/Type \/Page\b/g)?.length).toBe(sides)
 })
