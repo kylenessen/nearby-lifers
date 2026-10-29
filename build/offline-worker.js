@@ -60,6 +60,25 @@ self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET') return
   const url = new URL(request.url)
+  // Decode the exact saved response, including photos from hosts without CORS.
+  // A unique local URL bypasses the browser's in-memory image cache.
+  if (
+    request.destination === 'image' &&
+    url.origin === root.origin &&
+    url.pathname === root.pathname + 'offline-photo-check'
+  ) {
+    const name = url.searchParams.get('cache') ?? ''
+    const photo = url.searchParams.get('photo') ?? ''
+    event.respondWith(
+      (async () => {
+        if (!name.startsWith(PHOTO_PREFIX)) return Response.error()
+        return (
+          (await (await caches.open(name)).match(photo)) ?? Response.error()
+        )
+      })(),
+    )
+    return
+  }
   if (
     request.mode === 'navigate' &&
     url.origin === root.origin &&
@@ -79,8 +98,10 @@ self.addEventListener('fetch', (event) => {
   ) {
     event.respondWith(
       (async () =>
-        (await caches.match(request, { ignoreSearch: true, ignoreVary: true })) ??
-        fetch(request))(),
+        (await caches.match(request, {
+          ignoreSearch: true,
+          ignoreVary: true,
+        })) ?? fetch(request))(),
     )
     return
   }

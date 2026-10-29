@@ -12,7 +12,9 @@ const photoServer = createServer((request, response) => {
   downloads.push(request.url!)
   response.writeHead(200, {
     'content-type': 'image/svg+xml',
-    'access-control-allow-origin': '*',
+    ...(request.url?.endsWith('0.svg')
+      ? {}
+      : { 'access-control-allow-origin': '*' }),
     'cache-control': 'no-store',
   })
   response.end(
@@ -255,7 +257,27 @@ test('failed photo downloads stay incomplete and retry only the missing photos',
     .getByRole('button', { name: 'Save for offline', exact: true })
     .click()
   await expect(page.getByText(/Offline download complete/)).toBeVisible()
-  expect(downloads).toEqual(['/offline-photo-0.svg'])
+  expect([...new Set(downloads)]).toEqual(['/offline-photo-0.svg'])
+  expect(downloads).toHaveLength(2) // CORS attempt, then an opaque download.
+  // Closing a tab between storing and validating a photo must not claim success.
+  await page.evaluate(async () => {
+    for (const name of (await caches.keys()).filter((name) =>
+      name.startsWith('nearby-lifers-photos-'),
+    )) {
+      const cache = await caches.open(name)
+      for (const request of await cache.keys())
+        if (request.url.includes('offline-photo-verified'))
+          await cache.delete(request)
+    }
+  })
+  await page.reload()
+  await expect(
+    page.getByRole('button', { name: 'Save for offline', exact: true }),
+  ).toBeEnabled()
+  await page
+    .getByRole('button', { name: 'Save for offline', exact: true })
+    .click()
+  await expect(page.getByText(/Offline download complete/)).toBeVisible()
   // Eviction must not leave a false readiness claim. Saving repairs the shell.
   await page.evaluate(async () => {
     for (const key of await caches.keys())
@@ -281,4 +303,28 @@ test('failed photo downloads stay incomplete and retry only the missing photos',
       ),
     ),
   ).toEqual([])
+})
+
+test('storage exhaustion stops the download without claiming offline readiness', async ({
+  page,
+}) => {
+  await openSaved(page)
+  await page.evaluate(() => {
+    Cache.prototype.put = async () => {
+      throw new DOMException('Storage full', 'QuotaExceededError')
+    }
+  })
+  await page
+    .getByRole('button', { name: 'Save for offline', exact: true })
+    .click()
+  await expect(page.getByText(/Not enough device storage/)).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Save for offline', exact: true }),
+  ).toBeEnabled()
+  await expect(
+    page.getByText('Saved on this device until you choose Refresh.', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  await expect(page.getByText(/Ready for offline use/)).toHaveCount(0)
 })

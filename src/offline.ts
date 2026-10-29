@@ -31,6 +31,19 @@ async function searchPrefix(snapshot: Snapshot) {
 async function cacheName(snapshot: Snapshot) {
   return (await searchPrefix(snapshot)) + Date.parse(snapshot.builtAt)
 }
+function verificationKey(photo: string) {
+  const url = new URL('offline-photo-verified', scope)
+  url.searchParams.set('photo', photo)
+  return url.href
+}
+async function photoSaved(cache: Cache, url: string) {
+  const response = await cache.match(url)
+  // Interrupted opaque downloads must be verified again before reporting success.
+  return Boolean(
+    response &&
+    (response.type !== 'opaque' || (await cache.match(verificationKey(url)))),
+  )
+}
 
 function checkShell(worker: ServiceWorker, repair = false): Promise<boolean> {
   return new Promise((resolve) => {
@@ -116,34 +129,90 @@ export async function offlineReady(snapshot: Snapshot) {
   if (!(await caches.has(name))) return false
   const cache = await caches.open(name)
   const entries = await Promise.all(
-    photos(snapshot).map((url) => cache.match(url)),
+    photos(snapshot).map((url) => photoSaved(cache, url)),
   )
   return entries.every(Boolean)
 }
 
-async function downloadPhoto(url: string, signal: AbortSignal) {
+async function decodePhoto(url: string, signal: AbortSignal) {
+  signal.throwIfAborted()
+  const image = new Image()
+  const controller = AbortSignal.any([signal, AbortSignal.timeout(20000)])
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      image.src = ''
+      reject(controller.reason)
+    }
+    controller.addEventListener('abort', abort, { once: true })
+    image.src = url
+    image
+      .decode()
+      .then(resolve, reject)
+      .finally(() => controller.removeEventListener('abort', abort))
+  })
+}
+
+async function downloadPhoto(
+  cache: Cache,
+  name: string,
+  url: string,
+  signal: AbortSignal,
+) {
   let failure: unknown
   for (let attempt = 0; attempt < 3; attempt++) {
     signal.throwIfAborted()
+    let stored = false
     try {
-      const response = await fetch(url, {
-        mode: 'cors',
-        credentials: 'omit',
-        signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
-      })
-      if (!response.ok) throw new Error('Photo download failed.')
-      // Decode before confirming success. A cached error page is not a photo.
-      const objectUrl = URL.createObjectURL(await response.clone().blob())
-      try {
-        const image = new Image()
-        image.src = objectUrl
-        await image.decode()
-      } finally {
-        URL.revokeObjectURL(objectUrl)
+      const fetchPhoto = (mode: RequestMode) =>
+        fetch(url, {
+          mode,
+          credentials: 'omit',
+          signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
+        })
+      // iNaturalist's static host serves displayable photos without CORS headers.
+      let response: Response
+      if (new URL(url).hostname === 'static.inaturalist.org')
+        response = await fetchPhoto('no-cors')
+      else {
+        try {
+          response = await fetchPhoto('cors')
+        } catch {
+          signal.throwIfAborted()
+          response = await fetchPhoto('no-cors')
+        }
       }
-      return response
-    } catch (cause) {
+      if (response.type === 'opaque') {
+        await cache.put(url, response)
+        stored = true
+        const check = new URL('offline-photo-check', scope)
+        check.searchParams.set('cache', name)
+        check.searchParams.set('photo', url)
+        check.searchParams.set('check', crypto.randomUUID())
+        await decodePhoto(check.href, signal)
+        signal.throwIfAborted()
+        await cache.put(verificationKey(url), new Response('verified'))
+      } else {
+        if (!response.ok) throw new Error('Photo download failed.')
+        const objectUrl = URL.createObjectURL(await response.clone().blob())
+        try {
+          await decodePhoto(objectUrl, signal)
+        } finally {
+          URL.revokeObjectURL(objectUrl)
+        }
+        signal.throwIfAborted()
+        await cache.put(url, response)
+        stored = true
+      }
       signal.throwIfAborted()
+      return
+    } catch (cause) {
+      if (stored) {
+        await cache.delete(url)
+        await cache.delete(verificationKey(url))
+      }
+      signal.throwIfAborted()
+      if (cause instanceof DOMException && cause.name === 'QuotaExceededError')
+        throw cause
       failure = cause
       if (attempt < 2)
         await new Promise<void>((resolve, reject) => {
@@ -179,20 +248,24 @@ export async function saveOffline(
   let next = 0
   let completed = 0
   let failed = 0
+  let storageFull = false
   await Promise.all(
     Array.from({ length: Math.min(4, urls.length) }, async () => {
-      while (next < urls.length) {
+      while (next < urls.length && !storageFull) {
         signal.throwIfAborted()
         const url = urls[next++]
         try {
-          if (!(await cache.match(url))) {
-            const response = await downloadPhoto(url, signal)
-            signal.throwIfAborted()
-            await cache.put(url, response)
+          if (!(await photoSaved(cache, url))) {
+            await downloadPhoto(cache, name, url, signal)
           }
           completed++
-        } catch {
+        } catch (cause) {
           signal.throwIfAborted()
+          if (
+            cause instanceof DOMException &&
+            cause.name === 'QuotaExceededError'
+          )
+            storageFull = true
           failed++
         }
         onProgress(
@@ -202,6 +275,10 @@ export async function saveOffline(
     }),
   )
   signal.throwIfAborted()
+  if (storageFull)
+    throw new Error(
+      'Not enough device storage to finish the offline download. Remove an older saved search or free space, then try again.',
+    )
   if (failed || !(await offlineReady(snapshot)))
     throw new Error(
       `${failed ? `${failed} photo downloads failed. ` : ''}Offline saving is incomplete. Reconnect and try again to download the missing files.`,
