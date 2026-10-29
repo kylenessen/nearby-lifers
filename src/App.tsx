@@ -1027,10 +1027,8 @@ export default function App() {
                         )}
                       </>
                     )}
-                    {view.printMode === 'booklet' ? (
-                      <>
                         <label className="booklet-title-label">
-                          Cover title
+                          {view.printMode === 'booklet' ? 'Cover title' : 'Guide title'}
                           <input
                             value={view.bookletTitle}
                             maxLength={120}
@@ -1040,6 +1038,8 @@ export default function App() {
                             }
                           />
                         </label>
+                    {view.printMode === 'booklet' ? (
+                      <>
                         <NumberField
                           label="Warn above this many sheets"
                           className="sheet-limit-label"

@@ -351,6 +351,7 @@ for (const layout of ['grid', 'list'] as const) {
   }) => {
     await load(page)
     await page.getByRole('button', { name: 'Print options' }).click()
+    await page.getByLabel('Guide title', { exact: true }).fill('Morro Bay field guide')
     await page
       .getByRole('button', {
         name: layout === 'grid' ? 'Photo grid' : 'Taxon checklist',
@@ -378,9 +379,15 @@ for (const layout of ['grid', 'list'] as const) {
         ).toHaveCount(42)
         const issues = await output.evaluate((el, format) => {
           const errors: string[] = []
+          const photoHeights: number[] = []
           for (const sheet of el.querySelectorAll<HTMLElement>(
             '.print-sheet',
           )) {
+            if (sheet.querySelector('.sheet-header')) errors.push('large header remains')
+            const footer = sheet.querySelector('.sheet-footer')!
+            if (getComputedStyle(footer).fontSize !== '12px') errors.push('footer is not nine points')
+            if (footer.children[0].textContent !== 'Morro Bay field guide') errors.push('footer title missing')
+            if (!/^\d+$/.test(footer.children[1].textContent ?? '')) errors.push('footer shows more than the page number')
             if (sheet.scrollHeight > sheet.clientHeight + 1)
               errors.push('sheet overflow')
             const body = sheet
@@ -402,6 +409,8 @@ for (const layout of ['grid', 'list'] as const) {
               )
                 errors.push('photo too small')
               if (format === 'grid') {
+                photoHeights.push(item.querySelector('.print-photo')!.getBoundingClientRect().height)
+                if (item.querySelector('.paper-checkbox, .print-card-group')) errors.push('old photo labels remain')
                 if (
                   getComputedStyle(item.querySelector('.print-photo img')!)
                     .objectFit !== 'cover'
@@ -410,6 +419,7 @@ for (const layout of ['grid', 'list'] as const) {
               }
             }
           }
+          if (photoHeights.length && Math.max(...photoHeights) - Math.min(...photoHeights) > 1) errors.push('partial pages resize photos')
           return errors
         }, layout)
         expect(issues, `${paper} ${density} ${layout}`).toEqual([])

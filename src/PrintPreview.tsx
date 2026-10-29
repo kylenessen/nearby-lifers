@@ -1,9 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { MONTHS, PAPERS } from './search'
+import { PAPERS } from './search'
 import { groupSpecies } from './presentation'
 import { recordDetails, recordLabel } from './gbif'
-import { SOURCES } from './search'
 import { bookletPlan } from './booklet'
 import { BookletBack, BookletParameters } from './BookletDetails'
 import type { View } from './search'
@@ -19,46 +18,6 @@ type Props = {
   visible: boolean
   onBookletSheetsChange?: (sheets: number) => void
   onGridFitsChange?: (fits: boolean) => void
-}
-function Header({
-  snapshot,
-  count,
-  view,
-}: {
-  snapshot: Snapshot
-  count: number
-  view: View
-}) {
-  return (
-    <header className="sheet-header">
-      <div>
-        <strong>Nearby Lifers</strong>
-        <span>
-          {count} species ·{' '}
-          {view.showObserved ? 'Including observed species' : 'Field checklist'}
-        </span>
-      </div>
-      <p>
-        {snapshot.users.map((u) => u.login).join(', ')} · {snapshot.areaLabel}
-      </p>
-      <p>
-        {snapshot.search.months
-          .slice()
-          .sort((a, b) => a - b)
-          .map((m) => MONTHS[m - 1])
-          .join(', ')}{' '}
-        ·{' '}
-        {snapshot.search.excludeUserCasual
-          ? 'Life list excludes casual'
-          : 'Life list includes all quality grades'}
-        {view.hideCasual ? ' · No casual-only targets' : ''}
-        {view.hideUnexpected ? ' · Expected nearby' : ''}
-        {snapshot.external
-          ? ` · ${SOURCES[snapshot.search.source]}. Larger source count shown. iNaturalist filters only.`
-          : ''}
-      </p>
-    </header>
-  )
 }
 function Row({ species }: { species: Species }) {
   return (
@@ -366,16 +325,9 @@ export function PrintPreview({
   })
   const footer = (number: number) => (
     <footer className="sheet-footer">
-      <span>
-        {booklet
-          ? view.bookletTitle.trim() || 'Nearby Lifers'
-          : `iNaturalist records · ${date}`}
-      </span>
-      <span>{booklet ? number : `${number} / ${pageCount}`}</span>
+      <span>{view.bookletTitle.trim() || 'Nearby Lifers'}</span>
+      <span>{number}</span>
     </footer>
-  )
-  const header = !booklet && (
-    <Header snapshot={snapshot} count={species.length} view={view} />
   )
   const card = (s: Species, measured = false) => (
     <PrintCard
@@ -399,7 +351,6 @@ export function PrintPreview({
             data-content-index={index}
             key={index}
           >
-            {header}
             {groupHeader(pageGroupLabels[index])}
             <div className="sheet-body print-grid">
               {page.map((s) => card(s))}
@@ -413,7 +364,6 @@ export function PrintPreview({
             data-content-index={index}
             key={index}
           >
-            {header}
             <div className="sheet-body print-list-columns">
               {page.map((column, columnIndex) => (
                 <div className="print-list-column" key={columnIndex}>
@@ -475,7 +425,6 @@ export function PrintPreview({
       {view.layout === 'grid' && (
         <div className="print-measure" ref={gridMeasure} aria-hidden="true">
           <div className="print-sheet">
-            {header}
             {groupHeader(pageGroupLabels[0] ?? '')}
             <div className="sheet-body print-grid">
               {orderedSpecies.map((s) => card(s, true))}
@@ -506,7 +455,6 @@ export function PrintPreview({
       {view.layout === 'list' && (
         <div className="print-measure" ref={measure} aria-hidden="true">
           <div className="print-sheet">
-            {header}
             <div className="sheet-body">
               <div className="measure-column">
                 {groups.map((group) => (

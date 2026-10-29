@@ -36,33 +36,6 @@
   box-shadow: 0 3px 18px #27372720;
   margin: 0 auto 25px;
 }
-.sheet-header {
-  flex: 0 0 auto;
-  padding-bottom: 2.5mm;
-  border-bottom: 0.3mm solid #333;
-}
-.sheet-header > div {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1mm 3mm;
-}
-.sheet-header strong {
-  font-family: Georgia, serif;
-  font-size: 19pt;
-  font-weight: normal;
-  letter-spacing: -0.5pt;
-}
-.sheet-header span {
-  font-size: 7pt;
-}
-.sheet-header p {
-  margin: 1.1mm 0 0;
-  font-size: 7pt;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
 .sheet-body {
   flex: 1 1 0;
   min-height: 0;
@@ -71,10 +44,8 @@
   display: flex;
   justify-content: space-between;
   gap: 3mm;
-  font-size: 6pt;
+  font-size: 9pt;
   line-height: 1.2;
-  border-top: 0.2mm solid #aaa;
-  padding-top: 2mm;
   flex: 0 0 auto;
 }
 .sheet-footer > span:first-child {
@@ -83,11 +54,6 @@
 }
 .sheet-footer > span:last-child {
   flex-shrink: 0;
-}
-.booklet-output .sheet-footer {
-  font-size: 9pt;
-  border-top: 0;
-  padding-top: 0;
 }
 .page-group-header {
   font-size: 9pt;
@@ -199,13 +165,6 @@
 .density-large {
   --print-font: 11pt;
   --print-small: 9pt;
-}
-.paper-a6 .sheet-header strong {
-  font-size: 16pt;
-}
-.paper-a6 .sheet-header span,
-.paper-a6 .sheet-header p {
-  font-size: 6pt;
 }
 .paper-a6.density-compact {
   --print-font: 7.5pt;
