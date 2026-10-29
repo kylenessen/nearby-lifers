@@ -97,6 +97,12 @@ export function PrintPreview({
   onGridFitsChange,
 }: Props) {
   const booklet = view.printMode === 'booklet'
+  // A newly opened preview gets today's generation date, even for older saved results.
+  const generatedAt = useMemo(
+    () => new Date().toISOString(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, snapshot],
+  )
   const paperKey = booklet ? 'half' : view.paper
   const paper = PAPERS[paperKey]
   const { columns, rows } = printGrid(view)
@@ -318,7 +324,7 @@ export function PrintPreview({
       ),
     )
   }
-  const date = new Date(snapshot.builtAt).toLocaleDateString(undefined, {
+  const date = new Date(generatedAt).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -510,6 +516,7 @@ export function PrintPreview({
                           <div className="sheet-body booklet-parameters-body">
                             <BookletParameters
                               snapshot={snapshot}
+                              generatedAt={generatedAt}
                               view={view}
                               count={species.length}
                             />

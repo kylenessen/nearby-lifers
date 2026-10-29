@@ -4,6 +4,7 @@ import { Circle, Hand, Pentagon, Square, Undo2 } from 'lucide-react'
 import { boundsOf, DEFAULT_CENTER, MAX_VERTICES, polygonError } from './search'
 import type { Area, Point } from './search'
 import type { INatPlace } from './inaturalist'
+import { useOnline } from './network'
 
 type Mode = 'browse' | 'circle' | 'rectangle' | 'polygon'
 type Props = {
@@ -39,6 +40,7 @@ export function LocationMap({
   onDrawingChange,
 }: Props) {
   const container = useRef<HTMLDivElement>(null)
+  const online = useOnline()
   const mapRef = useRef<L.Map | null>(null)
   const selectedLayer = useRef<L.LayerGroup | null>(null)
   const draftLayer = useRef<L.LayerGroup | null>(null)
@@ -69,13 +71,20 @@ export function LocationMap({
       [DEFAULT_CENTER.lat, DEFAULT_CENTER.lng],
       14,
     )
-    L.tileLayer(
+    const tiles = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
         attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics',
         maxZoom: 19,
       },
-    ).addTo(map)
+    )
+    const updateTiles = () => {
+      if (navigator.onLine) tiles.addTo(map)
+      else tiles.remove()
+    }
+    updateTiles()
+    window.addEventListener('online', updateTiles)
+    window.addEventListener('offline', updateTiles)
     mapRef.current = map
     selectedLayer.current = L.layerGroup().addTo(map)
     draftLayer.current = L.layerGroup().addTo(map)
@@ -83,6 +92,8 @@ export function LocationMap({
     resize.observe(container.current)
     return () => {
       resize.disconnect()
+      window.removeEventListener('online', updateTiles)
+      window.removeEventListener('offline', updateTiles)
       map.remove()
       mapRef.current = null
       fittedKey.current = ''
@@ -205,18 +216,22 @@ export function LocationMap({
       group = selectedLayer.current
     if (!map || !group) return
     group.clearLayers()
+    const boundaryStyle = {
+      ...shapeStyle,
+      color: online ? shapeStyle.color : '#246956',
+    }
     let bounds: L.LatLngBounds | undefined
     if (area.kind === 'circle') {
       const center: L.LatLngTuple = [area.center.lat, area.center.lng]
       bounds = L.circle(center, {
-        ...shapeStyle,
+        ...boundaryStyle,
         radius: radius * 1000,
         interactive: false,
       })
         .addTo(group)
         .getBounds()
       L.circleMarker(center, {
-        ...shapeStyle,
+        ...boundaryStyle,
         radius: 5,
         fillOpacity: 1,
         interactive: false,
@@ -227,21 +242,24 @@ export function LocationMap({
           [area.bounds.sw.lat, area.bounds.sw.lng],
           [area.bounds.ne.lat, area.bounds.ne.lng],
         ],
-        { ...shapeStyle, interactive: false },
+        { ...boundaryStyle, interactive: false },
       )
         .addTo(group)
         .getBounds()
     } else if (area.kind === 'polygon') {
       bounds = L.polygon(
         area.points.map((p) => [p.lat, p.lng]),
-        { ...shapeStyle, interactive: false },
+        { ...boundaryStyle, interactive: false },
       )
         .addTo(group)
         .getBounds()
     } else if (place?.id === area.id) {
       const geojson = place.geometry_geojson ?? place.bounding_box_geojson
       if (geojson)
-        bounds = L.geoJSON(geojson, { style: shapeStyle, interactive: false })
+        bounds = L.geoJSON(geojson, {
+          style: boundaryStyle,
+          interactive: false,
+        })
           .addTo(group)
           .getBounds()
     }
@@ -250,7 +268,7 @@ export function LocationMap({
       map.fitBounds(bounds.pad(0.15), { maxZoom: 16, animate: false })
       fittedKey.current = key
     }
-  }, [area, radius, place])
+  }, [area, radius, place, online])
 
   const hint =
     mode === 'browse'
@@ -264,6 +282,11 @@ export function LocationMap({
           : `Tap to add corners, then finish. Drag numbered corners to adjust. ${points.length} corners added.`
   return (
     <div className="map-editor">
+      {!online && (
+        <p className="hint" role="status">
+          Offline. Search boundary shown without satellite imagery.
+        </p>
+      )}
       <div className="map-tools" aria-label="Map tools">
         {(
           [

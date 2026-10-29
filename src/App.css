@@ -794,3 +794,28 @@ fieldset legend {
 .booklet-title-label input {
   margin-top: 7px;
 }
+.saved-results {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: #edf2eb;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  color: #3e5048;
+}
+.saved-results p {
+  margin: 0 0 8px;
+}
+.saved-results details {
+  margin-top: 10px;
+}
+.saved-results summary {
+  cursor: pointer;
+}
+.saved-results details p {
+  margin-top: 10px;
+}
+.saved-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

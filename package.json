@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:offline": "GITHUB_PAGES=true npm run build && playwright test --config=playwright.offline.config.ts"
   },
   "dependencies": {
     "@turf/simplify": "^7.4.0",
