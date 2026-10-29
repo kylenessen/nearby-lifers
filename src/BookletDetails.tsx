@@ -48,10 +48,12 @@ export function BookletParameters({
   snapshot,
   view,
   count,
+  generatedAt,
 }: {
   snapshot: Snapshot
   view: View
   count: number
+  generatedAt: string
 }) {
   const { search } = snapshot
   const { area } = search
@@ -66,12 +68,25 @@ export function BookletParameters({
   const parameters = [
     [
       'Generated on',
-      new Date(snapshot.builtAt).toLocaleDateString(undefined, {
+      new Date(generatedAt).toLocaleDateString(undefined, {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
       }),
     ],
+    ...(new Date(generatedAt).toDateString() !==
+    new Date(snapshot.builtAt).toDateString()
+      ? [
+          [
+            'Results collected',
+            new Date(snapshot.builtAt).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            }),
+          ],
+        ]
+      : []),
     ['Username', snapshot.users.map((u) => `@${u.login}`).join(', ')],
     ...(snapshot.external
       ? [

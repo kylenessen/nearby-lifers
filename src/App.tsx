@@ -16,7 +16,9 @@ import { UsernameField } from './UsernameField'
 import { PrintPreview } from './PrintPreview'
 import { printGrid } from './print-layout'
 import { groupSpecies } from './presentation'
-import { recordDetails, recordLabel } from './gbif'
+import { clearGbifCounts, recordDetails, recordLabel } from './gbif'
+import { readSavedResults, saveResults } from './saved-results'
+import { SavedResultsControls } from './SavedResultsControls'
 import {
   areaLabel,
   decodeSettings,
@@ -117,6 +119,9 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState('Loading your search.')
   const [retry, setRetry] = useState(0)
+  const [saved, setSaved] = useState(false)
+  const [storageMessage, setStorageMessage] = useState('')
+  const forceRefresh = useRef(false)
   const [place, setPlace] = useState<INatPlace | null>(null)
   const [placeQuery, setPlaceQuery] = useState('')
   const [places, setPlaces] = useState<INatPlace[]>([])
@@ -174,11 +179,41 @@ export default function App() {
     const controller = new AbortController()
     requestRef.current = controller
     const search = settings.search
+    const refresh = forceRefresh.current
+    forceRefresh.current = false
+    let previous =
+      snapshot && searchKey(snapshot.search) === loadKey ? snapshot : null
     setLoading(true)
+    setProgress(refresh ? 'Refreshing your search.' : 'Opening your search.')
     setError(null)
-    setSnapshot(null)
+    setSnapshot(refresh ? previous : null)
+    if (!refresh || !previous) setSaved(false)
+    setStorageMessage('')
     setPreview(false)
     void (async () => {
+      try {
+        const stored = await readSavedResults(search, controller.signal)
+        controller.signal.throwIfAborted()
+        if (stored) {
+          previous = stored
+          setSnapshot(stored)
+          setPlace(stored.place ?? null)
+          setSaved(true)
+          if (!refresh) return
+        }
+      } catch (cause) {
+        controller.signal.throwIfAborted()
+        setStorageMessage(
+          cause instanceof Error
+            ? cause.message
+            : 'Saved results storage is unavailable.',
+        )
+      }
+      if (!navigator.onLine)
+        throw new Error(
+          'You are offline. Connect to the internet to refresh or run a new search.',
+        )
+      if (refresh) clearGbifCounts()
       let label = areaLabel(search.area, search.radius)
       let searchedPlace: INatPlace | undefined
       if (search.area.kind === 'place') {
@@ -196,15 +231,30 @@ export default function App() {
         setProgress,
         searchedPlace,
       )
-      if (!controller.signal.aborted)
-        setSnapshot({ ...result, place: searchedPlace })
+      controller.signal.throwIfAborted()
+      const completed = { ...result, place: searchedPlace }
+      setSnapshot(completed)
+      setPlace(searchedPlace ?? null)
+      setSaved(false)
+      try {
+        await saveResults(completed, controller.signal)
+        controller.signal.throwIfAborted()
+        setSaved(true)
+        setStorageMessage('')
+      } catch {
+        controller.signal.throwIfAborted()
+        setStorageMessage(
+          'Results are available, but this browser could not save them. Reopening will need a new search.',
+        )
+      }
     })()
       .catch((cause) => {
         if (!controller.signal.aborted) {
           setError(
-            cause instanceof Error
+            (cause instanceof Error
               ? cause.message
-              : 'The search could not finish. Please try again.',
+              : 'The search could not finish. Please try again.') +
+              (previous ? ' Your previous results have been kept.' : ''),
           )
           controller.abort()
         }
@@ -218,11 +268,15 @@ export default function App() {
   }, [loadKey, retry, canLoad])
 
   const placeId = draft.area.kind === 'place' ? draft.area.id : null
+  const searchedPlaceId =
+    settings.search.area.kind === 'place' ? settings.search.area.id : null
   useEffect(() => {
     if (!placeId) {
       setPlace(null)
       return
     }
+    // The main search restores the place with its saved results, without a request.
+    if (searchedPlaceId === placeId) return
     const controller = new AbortController()
     void fetchPlaceDetails(placeId, controller.signal)
       .then(setPlace)
@@ -230,7 +284,7 @@ export default function App() {
         if (!controller.signal.aborted) setPlaceError(cause.message)
       })
     return () => controller.abort()
-  }, [placeId])
+  }, [placeId, searchedPlaceId])
 
   useEffect(() => {
     if (placeQuery.trim().length < 2) {
@@ -709,7 +763,7 @@ export default function App() {
               </button>
               <button
                 type="button"
-                disabled={!snapshot || !visible.length || pending}
+                disabled={!snapshot || !visible.length || pending || loading}
                 onClick={() => setPreview((v) => !v)}
               >
                 <Printer size={16} />
@@ -753,6 +807,18 @@ export default function App() {
             )}
             {snapshot && (
               <>
+                <SavedResultsControls
+                  key={loadKey + snapshot.builtAt}
+                  snapshot={snapshot}
+                  saved={saved}
+                  busy={loading || pending}
+                  storageMessage={storageMessage}
+                  onSavedChange={setSaved}
+                  onRefresh={() => {
+                    forceRefresh.current = true
+                    setRetry((v) => v + 1)
+                  }}
+                />
                 <p className="result-context">
                   {snapshot.areaLabel} ·{' '}
                   {snapshot.search.months
@@ -807,8 +873,7 @@ export default function App() {
                       {SOURCES[snapshot.search.source]}. Counts show the larger
                       source count for each species. Source totals are not
                       added. The quality and expected-range filters apply to
-                      iNaturalist records. GBIF records remain eligible. GBIF
-                      results may be cached for up to one hour in this tab.
+                      iNaturalist records. GBIF records remain eligible.
                     </p>
                     {snapshot.external.warnings.map((warning) => (
                       <p className="hint" key={warning}>
@@ -1027,19 +1092,21 @@ export default function App() {
                         )}
                       </>
                     )}
+                    <label className="booklet-title-label">
+                      {view.printMode === 'booklet'
+                        ? 'Cover title'
+                        : 'Guide title'}
+                      <input
+                        value={view.bookletTitle}
+                        maxLength={120}
+                        placeholder="Nearby Lifers"
+                        onChange={(event) =>
+                          updateView({ bookletTitle: event.target.value })
+                        }
+                      />
+                    </label>
                     {view.printMode === 'booklet' ? (
                       <>
-                        <label className="booklet-title-label">
-                          Cover title
-                          <input
-                            value={view.bookletTitle}
-                            maxLength={120}
-                            placeholder="Nearby Lifers"
-                            onChange={(event) =>
-                              updateView({ bookletTitle: event.target.value })
-                            }
-                          />
-                        </label>
                         <NumberField
                           label="Warn above this many sheets"
                           className="sheet-limit-label"

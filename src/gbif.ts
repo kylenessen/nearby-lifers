@@ -18,6 +18,9 @@ const countCache = new Map<
     value: { counts: Map<number, number>; higherRankRecords: number }
   }
 >()
+export function clearGbifCounts() {
+  countCache.clear()
+}
 export type GbifTaxon = {
   key: number
   canonicalName: string
@@ -174,7 +177,7 @@ export async function fetchGbifCounts(
   query.set('facet', 'speciesKey')
   query.set('facetLimit', '1000')
   let total: number | undefined
-  for (let offset = 0; ; ) {
+  for (let offset = 0; ;) {
     query.set('facetOffset', String(offset))
     const data = await json<FacetResponse>(
       `/occurrence/search?${query}`,

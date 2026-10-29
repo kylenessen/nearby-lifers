@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import type { Snapshot } from './inaturalist'
+import { useOnline } from './network'
 
 export function PrintMap({ snapshot }: { snapshot: Snapshot }) {
   const container = useRef<HTMLDivElement>(null)
+  const online = useOnline()
   const [status, setStatus] = useState('Loading map imagery.')
   useLayoutEffect(() => {
     if (!container.current) return
@@ -30,7 +32,7 @@ export function PrintMap({ snapshot }: { snapshot: Snapshot }) {
       12,
     )
     const style = {
-      color: '#fff',
+      color: online ? '#fff' : '#174e3b',
       weight: 3,
       fillColor: '#174e3b',
       fillOpacity: 0.2,
@@ -84,14 +86,15 @@ export function PrintMap({ snapshot }: { snapshot: Snapshot }) {
       animate: false,
       maxZoom: 16,
     })
-    tiles.addTo(map)
+    if (online) tiles.addTo(map)
+    else setStatus('Offline. Search boundary shown without satellite imagery.')
     L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map)
     if (area.kind === 'place' && !snapshot.place?.geometry_geojson)
       setStatus('Place bounding rectangle shown.')
     return () => {
       map.remove()
     }
-  }, [snapshot])
+  }, [snapshot, online])
   return (
     <figure className="booklet-map">
       <div

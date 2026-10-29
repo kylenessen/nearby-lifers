@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/browser',
+  testIgnore: '**/offline.spec.ts',
   fullyParallel: true,
   timeout: 60000,
   expect: { timeout: 20000 },

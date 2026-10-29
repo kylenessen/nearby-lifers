@@ -181,7 +181,10 @@ test('username search supports keyboard and pointer selection without submitting
   await expect(
     page.getByText('42 species shown', { exact: true }),
   ).toBeVisible()
-  const username = page.getByRole('combobox', { name: 'Username', exact: true })
+  const username = page.getByRole('combobox', {
+    name: 'Username',
+    exact: true,
+  })
   await username.fill('Kyle')
   await expect(
     page.getByRole('option', { name: 'kylenessen Kyle Nessen' }),
@@ -352,6 +355,9 @@ for (const layout of ['grid', 'list'] as const) {
     await load(page)
     await page.getByRole('button', { name: 'Print options' }).click()
     await page
+      .getByLabel('Guide title', { exact: true })
+      .fill('Morro Bay field guide')
+    await page
       .getByRole('button', {
         name: layout === 'grid' ? 'Photo grid' : 'Taxon checklist',
         exact: true,
@@ -378,9 +384,19 @@ for (const layout of ['grid', 'list'] as const) {
         ).toHaveCount(42)
         const issues = await output.evaluate((el, format) => {
           const errors: string[] = []
+          const photoHeights: number[] = []
           for (const sheet of el.querySelectorAll<HTMLElement>(
             '.print-sheet',
           )) {
+            if (sheet.querySelector('.sheet-header'))
+              errors.push('large header remains')
+            const footer = sheet.querySelector('.sheet-footer')!
+            if (getComputedStyle(footer).fontSize !== '12px')
+              errors.push('footer is not nine points')
+            if (footer.children[0].textContent !== 'Morro Bay field guide')
+              errors.push('footer title missing')
+            if (!/^\d+$/.test(footer.children[1].textContent ?? ''))
+              errors.push('footer shows more than the page number')
             if (sheet.scrollHeight > sheet.clientHeight + 1)
               errors.push('sheet overflow')
             const body = sheet
@@ -402,6 +418,12 @@ for (const layout of ['grid', 'list'] as const) {
               )
                 errors.push('photo too small')
               if (format === 'grid') {
+                photoHeights.push(
+                  item.querySelector('.print-photo')!.getBoundingClientRect()
+                    .height,
+                )
+                if (item.querySelector('.paper-checkbox, .print-card-group'))
+                  errors.push('old photo labels remain')
                 if (
                   getComputedStyle(item.querySelector('.print-photo img')!)
                     .objectFit !== 'cover'
@@ -410,6 +432,11 @@ for (const layout of ['grid', 'list'] as const) {
               }
             }
           }
+          if (
+            photoHeights.length &&
+            Math.max(...photoHeights) - Math.min(...photoHeights) > 1
+          )
+            errors.push('partial pages resize photos')
           return errors
         }, layout)
         expect(issues, `${paper} ${density} ${layout}`).toEqual([])
@@ -927,7 +954,9 @@ test('long contents paginate without losing groups or shifting their references'
       const results = new URL(route.request().url()).searchParams.has('user_id')
         ? []
         : manyGroups
-      return route.fulfill({ json: { total_results: results.length, results } })
+      return route.fulfill({
+        json: { total_results: results.length, results },
+      })
     },
   )
   const settings = defaults()
@@ -1473,7 +1502,9 @@ async function mockExternalSources(page: Page, fail = false) {
       const results = u.searchParams.has('user_id')
         ? [{ count: 1, taxon: taxa[0] }]
         : [{ count: 20, taxon: taxa[1] }]
-      return route.fulfill({ json: { total_results: results.length, results } })
+      return route.fulfill({
+        json: { total_results: results.length, results },
+      })
     },
   )
   await page.route('https://api.inaturalist.org/v1/taxa**', (route) => {
@@ -1625,4 +1656,217 @@ test('a failed selected GBIF source never silently becomes an iNaturalist-only g
   expect(
     requests.filter((u) => u.pathname.endsWith('/occurrence/search')).length,
   ).toBe(1)
+})
+
+test('saved results survive reloads, new tabs and old collection dates without API requests', async ({
+  page,
+  context,
+}) => {
+  const requests: URL[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('api.inaturalist.org'))
+      requests.push(new URL(request.url()))
+  })
+  const external = await mockExternalSources(page)
+  const settings = defaults()
+  settings.search.source = 'ebird'
+  settings.search.groups = ['birds']
+  settings.search.area = { kind: 'place', id: 12 }
+  await page.goto(`/?${encodeSettings(settings)}`)
+  await expect(
+    page.getByText('Saved on this device until you choose Refresh.', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  const count = requests.length
+  const externalCount = external.length
+  // Age alone must never trigger a rebuild.
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve) => {
+      const request = indexedDB.open('nearby-lifers-results', 1)
+      request.onsuccess = () => resolve(request.result)
+    })
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction('searches', 'readwrite')
+      const store = tx.objectStore('searches')
+      const request = store.openCursor()
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (cursor) {
+          const entry = cursor.value
+          entry.snapshot.builtAt = '2020-01-02T12:00:00Z'
+          cursor.update(entry)
+          cursor.continue()
+        }
+      }
+      tx.oncomplete = () => resolve()
+    })
+    db.close()
+  })
+  await page.reload()
+  await expect(page.locator('.saved-results time')).toHaveAttribute(
+    'datetime',
+    '2020-01-02T12:00:00Z',
+  )
+  expect(requests.length).toBe(count)
+  expect(external.length).toBe(externalCount)
+  const tab = await context.newPage()
+  const tabRequests: URL[] = []
+  tab.on('request', (request) => {
+    if (request.url().includes('api.inaturalist.org'))
+      tabRequests.push(new URL(request.url()))
+  })
+  const tabExternal = await mockExternalSources(tab)
+  await tab.goto(page.url())
+  await expect(tab.locator('.saved-results time')).toHaveAttribute(
+    'datetime',
+    '2020-01-02T12:00:00Z',
+  )
+  expect(tabRequests).toHaveLength(0)
+  expect(tabExternal).toHaveLength(0)
+  // Refresh must bypass the existing in-memory GBIF count cache as well.
+  await tab
+    .getByRole('button', { name: 'Refresh results', exact: true })
+    .click()
+  await expect(tab.locator('.saved-results time')).not.toHaveAttribute(
+    'datetime',
+    '2020-01-02T12:00:00Z',
+  )
+  await expect(
+    tab.getByRole('button', { name: 'Refresh results', exact: true }),
+  ).toBeEnabled()
+  expect(tabRequests.some((url) => url.searchParams.has('user_id'))).toBe(true)
+  expect(
+    tabExternal.some((url) => url.pathname.endsWith('/occurrence/search')),
+  ).toBe(true)
+  const firstRefresh = tabExternal.filter((url) =>
+    url.pathname.endsWith('/occurrence/search'),
+  ).length
+  await tab
+    .getByRole('button', { name: 'Refresh results', exact: true })
+    .click()
+  await expect(
+    tab.getByRole('button', { name: 'Refresh results', exact: true }),
+  ).toBeEnabled()
+  await expect
+    .poll(
+      () =>
+        tabExternal.filter((url) => url.pathname.endsWith('/occurrence/search'))
+          .length,
+    )
+    .toBeGreaterThan(firstRefresh)
+})
+
+test('failed and canceled refreshes preserve the completed search on disk', async ({
+  page,
+}) => {
+  const requests = await mockApi(page)
+  await page.goto('/')
+  await expect(
+    page.getByText('Saved on this device until you choose Refresh.', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  const collected = await page
+    .locator('.saved-results time')
+    .getAttribute('datetime')
+  await page.route(
+    'https://api.inaturalist.org/v1/observations/species_counts**',
+    (route) => route.fulfill({ status: 400, json: { error: 'test failure' } }),
+  )
+  await page
+    .getByRole('button', { name: 'Refresh results', exact: true })
+    .click()
+  await expect(page.getByRole('alert')).toContainText(
+    'Your previous results have been kept.',
+  )
+  await expect(
+    page.getByText('42 species shown', { exact: true }),
+  ).toBeVisible()
+  await expect(page.locator('.saved-results time')).toHaveAttribute(
+    'datetime',
+    collected!,
+  )
+  await page.reload()
+  await expect(
+    page.getByText('42 species shown', { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.route(
+    'https://api.inaturalist.org/v1/observations/species_counts**',
+    async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await route
+        .fulfill({ json: { total_results: 0, results: [] } })
+        .catch(() => {})
+    },
+  )
+  await page
+    .getByRole('button', { name: 'Refresh results', exact: true })
+    .click()
+  await page
+    .locator('.loading')
+    .getByRole('button', { name: 'Cancel', exact: true })
+    .click()
+  await page.reload()
+  await expect(page.locator('.saved-results time')).toHaveAttribute(
+    'datetime',
+    collected!,
+  )
+  await expect(
+    page.getByText('42 species shown', { exact: true }),
+  ).toBeVisible()
+  expect(requests.length).toBeGreaterThan(0)
+})
+
+test('removing saved results rebuilds on the next visit and unavailable storage stays usable', async ({
+  page,
+  context,
+}) => {
+  const requests = await mockApi(page)
+  await page.goto('/')
+  await expect(
+    page.getByText('Saved on this device until you choose Refresh.', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  await page.getByText('Device storage', { exact: true }).click()
+  await page
+    .getByRole('button', { name: 'Remove saved copy', exact: true })
+    .click()
+  await expect(page.getByText(/Saved copy and photos removed/)).toBeVisible()
+  const count = requests.length
+  await page.reload()
+  await expect(
+    page.getByText('Saved on this device until you choose Refresh.', {
+      exact: false,
+    }),
+  ).toBeVisible()
+  expect(requests.length).toBeGreaterThan(count)
+  await page.getByText('Device storage', { exact: true }).click()
+  await page
+    .getByRole('button', { name: 'Clear all saved searches', exact: true })
+    .click()
+  await expect(
+    page.getByText(/All saved searches and photos removed/),
+  ).toBeVisible()
+  const tab = await context.newPage()
+  await tab.addInitScript(() =>
+    Object.defineProperty(window, 'indexedDB', {
+      get() {
+        throw new DOMException('Storage unavailable', 'SecurityError')
+      },
+    }),
+  )
+  await mockApi(tab)
+  await tab.goto(page.url())
+  await expect(tab.getByText('42 species shown', { exact: true })).toBeVisible()
+  await expect(
+    tab.getByText(
+      /Results are available, but this browser could not save them/,
+    ),
+  ).toBeVisible()
+  await expect(
+    tab.getByRole('button', { name: 'Print options', exact: true }),
+  ).toBeEnabled()
 })
